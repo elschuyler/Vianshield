@@ -1,0 +1,35 @@
+<resources>
+    <string name="app_name">Vianshield</string>
+    <string name="title_vianshield">Vianshield</string>
+    <string name="firewall_engine_status">Firewall engine not integrated yet</string>
+    <string name="action_open_log_keeper">Open Log Keeper</string>
+    <string name="log_keeper_title">Log Keeper</string>
+    <string name="log_keeper_subtitle">Diagnostic &amp; Process Audit</string>
+    <string name="master_switch_label">Master Logging</string>
+    <string name="archival_pending_title">Archival Export Pending</string>
+    <string name="archival_pending_desc">Logs have reached the 2 MiB storage cap. Please export to Downloads to archive records and reset the working buffer.</string>
+    <string name="action_export_logs">Export Logs</string>
+    <string name="action_copy_logs">Copy All</string>
+    <string name="action_clear_logs">Clear Logs</string>
+    <string name="memory_test_session_active">RAM Test (Active 15s)</string>
+    <string name="memory_test_session_idle">Test Session (15s RAM)</string>
+    <string name="empty_logs_placeholder">No diagnostic logs recorded yet.</string>
+    <string name="storage_usage_label">Storage: %1$s / 2.0 MiB</string>
+    <string name="privacy_disclaimer">Zero-PII guarantee: Packet payloads, DNS queries, browsing history, and credentials are never captured. Native SIGSEGV crashes cannot be caught by JVM exception handlers.</string>
+    <string name="vpn_section_title">WireGuard VPN</string>
+    <string name="action_import_conf">Import .conf</string>
+    <string name="action_change_conf">Change Config</string>
+    <string name="action_connect">Connect</string>
+    <string name="action_disconnect">Disconnect</string>
+    <string name="status_disconnected">Disconnected</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_tunnel_active_unverified">Tunnel Active — Connection Unverified</string>
+    <string name="status_connection_unconfirmed">Connection Unconfirmed</string>
+    <string name="status_error">Connection Error</string>
+    <string name="no_config_loaded">No WireGuard tunnel imported. Import a standard single-peer .conf file.</string>
+    <string name="vpn_notification_channel">Vianshield VPN</string>
+    <string name="vpn_notification_title">Vianshield WireGuard VPN</string>
+    <string name="routing_ipv4_only">Routing: IPv4 only (IPv6 traffic not routed)</string>
+    <string name="routing_dual_stack">Routing: Dual-stack (IPv4 &amp; IPv6)</string>
+    <string name="traffic_stats">Local TUN: TX: %1$d pkts | RX: %2$d pkts</string>
+</resources>

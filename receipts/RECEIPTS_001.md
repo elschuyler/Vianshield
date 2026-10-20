@@ -1,0 +1,291 @@
+# Receipts Log - RECEIPTS_001
+
+## Entry 001
+- **Timestamp**: 2026-10-14T10:52:00-07:00
+- **Summary**: Initial project initialization for Vianshield minimal native Android shell and GitHub Actions workflow.
+- **Exact Files Touched**:
+  - `metadata.json`
+  - `settings.gradle.kts`
+  - `app/build.gradle.kts`
+  - `app/src/main/res/values/strings.xml`
+  - `app/src/main/res/drawable/ic_launcher_background.xml`
+  - `app/src/main/res/drawable/ic_launcher_foreground.xml`
+  - `app/src/main/java/com/example/MainActivity.kt`
+  - `app/src/test/java/com/example/ExampleRobolectricTest.kt`
+  - `.github/workflows/android-build.yml`
+  - `README.md`
+  - `BLUEPRINT.md`
+  - `receipts/RECEIPTS_001.md`
+- **What Was Done**:
+  - Configured project branding and identity: set application name to "Vianshield" and applicationId to "app.vian.vianshield".
+  - Cleaned up build dependencies: commented out unused heavy libraries (Firebase BOM/AI/AppCheck, Room, Retrofit, OkHttp, Moshi, KSP) to optimize APK size and build overhead for low-memory target device (~3 GB RAM).
+  - Maintained signingConfigs intact for platform compatibility while ensuring debug-build reproducibility.
+  - Implemented `VianshieldHomeScreen` in Jetpack Compose showing the title "Vianshield" and honest status "Firewall engine not integrated yet" with zero fake telemetry or switches.
+  - Designed custom adaptive shield launcher vector icon.
+  - Created GitHub Actions workflow `.github/workflows/android-build.yml` targeting Java 21, Gradle wrapper, assembleDebug task, and artifact upload (`vianshield-debug-apk`).
+  - Generated Gradle 9.3.1 wrapper script (`gradlew`, `gradlew.bat`, `gradle-wrapper.jar`) so GitHub Actions runner can execute builds without local tooling prerequisites.
+  - Authored `README.md` and `BLUEPRINT.md`.
+- **How It Was Verified**: Local build only (`compile_applet` succeeded; Gradle `:app:testDebugUnitTest` executed 30 tasks with 0 failures, `BUILD SUCCESSFUL in 21s`). GitHub Actions workflow file validated structurally; on-device verification and remote runner execution pending user repository push / dispatch.
+- **Deviations**: None. Adhered strictly to step scope; stopped before engine integration.
+- **Known Issues / Follow-up**: Phase 2 network engine evaluation required before adding VPN or filtering logic.
+
+## Entry 002
+- **Timestamp**: 2026-10-14T14:15:00-07:00
+- **Summary**: Phase 1 cleanup: migrated namespace and Kotlin packages to app.vian.vianshield, removed Google Secrets plugin and config.
+- **Exact Files Touched**:
+  - `build.gradle.kts`
+  - `app/build.gradle.kts`
+  - `gradle/libs.versions.toml`
+  - `.env.example` (deleted)
+  - `app/src/main/java/app/vian/vianshield/MainActivity.kt` (created / updated)
+  - `app/src/main/java/app/vian/vianshield/ui/theme/Color.kt` (created / updated)
+  - `app/src/main/java/app/vian/vianshield/ui/theme/Theme.kt` (created / updated)
+  - `app/src/main/java/app/vian/vianshield/ui/theme/Type.kt` (created / updated)
+  - `app/src/test/java/app/vian/vianshield/ExampleRobolectricTest.kt` (created / updated)
+  - `app/src/test/java/app/vian/vianshield/ExampleUnitTest.kt` (created / updated)
+  - `app/src/androidTest/java/app/vian/vianshield/ExampleInstrumentedTest.kt` (created / updated)
+  - Deleted obsolete files under old `com/example` packages and pruned empty directories.
+  - `BLUEPRINT.md`
+  - `receipts/RECEIPTS_001.md`
+- **What Was Done**:
+  - Updated Android `namespace` in `app/build.gradle.kts` from `com.example` to `app.vian.vianshield`.
+  - Moved all Kotlin sources, Compose theme files, unit tests, and instrumented tests from `com.example` to `app.vian.vianshield`. Updated package declarations and imports consistently. Renamed theme Composable to `VianshieldTheme`.
+  - Removed Google Secrets Gradle Plugin from root `build.gradle.kts`, `app/build.gradle.kts`, and `gradle/libs.versions.toml`. Removed the `secrets { ... }` block and deleted `.env.example`.
+  - Preserved existing UI ("Firewall engine not integrated yet"), zero mock switches, zero fake telemetry.
+  - Preserved `.github/workflows/android-build.yml` and debug APK artifact pipeline.
+  - Set execution permissions on `gradlew` for CI runner consistency.
+- **How It Was Verified**: Local build only. Verified via `compile_applet` (succeeded), Gradle `:app:testDebugUnitTest` (30 tasks executed, 0 errors, `BUILD SUCCESSFUL in 26s`), and `./gradlew :app:assembleDebug` (37 tasks executed, 0 errors, `BUILD SUCCESSFUL in 3s`).
+- **Deviations**: None. Kept scope strictly to Phase 1 cleanup without introducing networking or firewall engine logic.
+- **Known Issues / Follow-up**: Ready for Phase 2 network engine architectural discussion upon user approval.
+
+## Entry 003
+- **Timestamp**: 2026-10-15T11:02:00-07:00
+- **Summary**: Workspace verification of Phase 1 cleanup files and GitHub sync capability check.
+- **Exact Files Touched**:
+  - `receipts/RECEIPTS_001.md`
+- **What Was Done**:
+  - Audited local workspace files: verified that `app/build.gradle.kts` has `namespace = "app.vian.vianshield"`, `gradle/libs.versions.toml` has no Google Secrets entries, `MainActivity.kt` and all theme/test files are properly located in `app.vian.vianshield`, and obsolete `com/example` files remain deleted.
+  - Checked Git status and remotes via `run_command`: confirmed the workspace container does not have a `.git` folder (`fatal: not a git repository`).
+  - Identified that GitHub repository pushes in Google AI Studio are driven exclusively through the user UI settings menu ("Export / Push to GitHub"), and cannot be triggered programmatically via backend shell commands without credentials.
+- **How It Was Verified**: Local workspace audit and command exit code 128 (`fatal: not a git repository`).
+- **Deviations**: Did not push to GitHub (direct CLI git push unavailable in environment; stopped to instruct user as directed).
+- **Known Issues / Follow-up**: User must use AI Studio UI to push/export to GitHub.
+
+## Entry 004
+- **Timestamp**: 2026-10-16T00:00:00-07:00
+- **Summary**: Phase 2 Step 1: Integrated Firestack pinned dependency from Maven Central, analyzed native ABIs, and measured APK impact.
+- **Exact Files Touched**:
+  - `gradle/libs.versions.toml`
+  - `app/build.gradle.kts`
+  - `ENGINE_DECISION.md`
+  - `BLUEPRINT.md`
+  - `receipts/RECEIPTS_001.md`
+- **What Was Done**:
+  - Integrated official `com.celzero:firestack:8134609734` dependency from Maven Central.
+  - Resolved POM packaging quirk where Maven POM declares `<packaging>jar</packaging>` but distributes `.aar`; configured `artifact { type = "aar" }` in `app/build.gradle.kts`.
+  - Verified native ABI coverage inside the AAR: confirmed `arm64-v8a`, `armeabi-v7a`, `x86`, and `x86_64` (all include `libgojni.so`).
+  - Authored `ENGINE_DECISION.md` documenting MPL-2.0 licence, ABI breakdown, packaging resolution, and memory/RAM considerations.
+  - Updated `BLUEPRINT.md` running ledger.
+  - Maintained Phase 1 shell UI, package namespace (`app.vian.vianshield`), application ID, and GitHub Actions workflow without adding VPN services or fake controls.
+- **How It Was Verified**: Local build only. Verified via `compile_applet` (succeeded), `./gradlew :app:testDebugUnitTest` (30 tasks executed, 0 errors, `BUILD SUCCESSFUL in 25s`), and `./gradlew :app:assembleDebug` (37 tasks executed, 0 errors, `BUILD SUCCESSFUL in 2s`). Resulting debug APK measured at 87 MB (contains all 4 uncompressed ABIs).
+- **Deviations**: None.
+- **Known Issues / Follow-up**: Push to GitHub requires AI Studio UI export. Awaiting user review before VPN service architecture discussion.
+
+## Entry 005
+- **Timestamp**: 2026-10-17T03:03:00-07:00
+- **Summary**: Applied ARM CPU architecture filters (arm64-v8a and armeabi-v7a) to app/build.gradle.kts, excluding x86 and x86_64.
+- **Exact Files Touched**:
+  - `app/build.gradle.kts`
+  - `BLUEPRINT.md`
+  - `receipts/RECEIPTS_001.md`
+- **What Was Done**:
+  - Configured `ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }` inside `android.defaultConfig` in `app/build.gradle.kts`.
+  - Excluded unused `x86` and `x86_64` native binaries while preserving both ARM architectures in a single APK.
+  - Maintained Firestack dependency, application ID (`app.vian.vianshield`), UI, SDK versions, dependencies, and GitHub Actions workflow.
+  - Updated `BLUEPRINT.md` running ledger.
+- **How It Was Verified**: Local build only. Verified via `compile_applet` (succeeded), `./gradlew :app:testDebugUnitTest` (30 tasks executed, 0 errors, `BUILD SUCCESSFUL in 30s`), and `./gradlew :app:assembleDebug` (37 tasks executed, 0 errors, `BUILD SUCCESSFUL in 5s`). Verified APK archive: contains only `lib/arm64-v8a/` and `lib/armeabi-v7a/`. APK size reduced from 90.7 MB (86.5 MiB) to 52.7 MB (50.3 MiB).
+- **Deviations**: None.
+- **Known Issues / Follow-up**: Changes are in local AI Studio workspace; user will push to GitHub via AI Studio settings to trigger GitHub Actions build.
+
+## Entry 006
+- **Timestamp**: 2026-10-17T12:35:00-07:00
+- **Summary**: Synchronized workspace with Vianshield repository (commit 2804496), verified zero diff, compiled and ran unit tests.
+- **Exact Files Touched**:
+  - `BLUEPRINT.md`
+  - `ENGINE_DECISION.md`
+  - `README.md`
+  - `.github/workflows/android-build.yml`
+  - `build.gradle.kts`
+  - `settings.gradle.kts`
+  - `metadata.json`
+  - `app/build.gradle.kts`
+  - `app/src/main/AndroidManifest.xml`
+  - `app/src/main/java/app/vian/vianshield/MainActivity.kt`
+  - `app/src/main/java/app/vian/vianshield/ui/theme/Color.kt`
+  - `app/src/main/java/app/vian/vianshield/ui/theme/Theme.kt`
+  - `app/src/main/java/app/vian/vianshield/ui/theme/Type.kt`
+  - `app/src/main/res/drawable/ic_launcher_background.xml`
+  - `app/src/main/res/drawable/ic_launcher_foreground.xml`
+  - `app/src/main/res/values/strings.xml`
+  - `app/src/test/java/app/vian/vianshield/ExampleRobolectricTest.kt`
+  - `app/src/test/java/app/vian/vianshield/ExampleUnitTest.kt`
+  - `app/src/androidTest/java/app/vian/vianshield/ExampleInstrumentedTest.kt`
+  - `gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`
+  - `receipts/RECEIPTS_001.md`
+- **What Was Done**:
+  - Synchronized workspace directly from GitHub repository `https://github.com/Viabhron-Core-Dev/Vianshield` at commit `28044965d8b7da5862c9b97564779cf286a25316`.
+  - Removed template boilerplate under old `com.example` packages and deleted `.env.example`.
+  - Maintained `metadata.json` platform synchronization (`name = "Vianshield"`) and preserved `MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API`.
+  - Verified exact zero-diff filesystem parity with the remote repository.
+  - Ran `compile_applet` to confirm applet compilation.
+  - Ran local Gradle task `gradle :app:testDebugUnitTest` to verify test suite.
+- **How It Was Verified**: Local build only. Verified via `compile_applet` (succeeded) and `gradle :app:testDebugUnitTest` (30 tasks executed, 0 errors, `BUILD SUCCESSFUL in 26s`).
+- **Deviations**: None. Rebuilt workspace to match Vianshield repository state precisely.
+- **Known Issues / Follow-up**: Ready for user review and subsequent development phase.
+
+## Entry 007
+- **Timestamp**: 2026-10-17T13:00:00-07:00
+- **Summary**: Surgical synchronization of diverged root files, settings, and test directories to achieve byte-exact parity with OG repository and BLUEPRINT.md.
+- **Exact Files Touched**:
+  - `metadata.json`
+  - `settings.gradle.kts`
+  - `build.gradle.kts`
+  - `gradle/libs.versions.toml`
+  - `app/src/test/java/app/vian/vianshield/ExampleRobolectricTest.kt`
+  - `app/src/test/java/app/vian/vianshield/ExampleUnitTest.kt`
+  - `app/src/androidTest/java/app/vian/vianshield/ExampleInstrumentedTest.kt`
+  - `gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`
+  - Pruned obsolete `com/example` directories in `main`, `test`, and `androidTest`
+  - `receipts/RECEIPTS_001.md`
+- **What Was Done**:
+  - Synchronized root configurations (`metadata.json`, `settings.gradle.kts`, `build.gradle.kts`, `libs.versions.toml`) to remove template references and restore `firestack` dependency definition.
+  - Set `metadata.json` name to "Vianshield" and description to match.
+  - Re-established test classes and directories under `app.vian.vianshield`.
+  - Pruned all residual `com/example` directories.
+  - Synced Gradle wrapper scripts (`gradlew`, `gradlew.bat`, `gradle/wrapper/gradle-wrapper.jar`) with execution permissions for CI pipeline.
+  - Executed recursive `diff` against remote repository clone to confirm zero divergence across all project files.
+- **How It Was Verified**: Local build only. Verified via `compile_applet` and Gradle test suite. Full recursive diff confirmed 0 differences (with the sole exception of the receipts ledger).
+- **Deviations**: None.
+- **Known Issues / Follow-up**: 100% parity achieved across code, tests, CI, and blueprint. Ready for next architectural phase.
+
+## Entry 008
+- **Timestamp**: 2026-10-17T13:28:00-07:00
+- **Summary**: Implemented Phase 2 Step 3 Log Catcher backend and Log Keeper UI with 2 MiB storage cap, SAF archival, and memory diagnostics.
+- **Exact Files Touched**:
+  - `app/src/main/java/app/vian/vianshield/logging/LogEntry.kt`
+  - `app/src/main/java/app/vian/vianshield/logging/LogCatcher.kt`
+  - `app/src/main/java/app/vian/vianshield/logging/MemoryDiagnostics.kt`
+  - `app/src/main/java/app/vian/vianshield/logging/LogKeeperViewModel.kt`
+  - `app/src/main/java/app/vian/vianshield/ui/LogKeeperScreen.kt`
+  - `app/src/main/java/app/vian/vianshield/MainActivity.kt`
+  - `app/src/main/res/values/strings.xml`
+  - `app/src/test/java/app/vian/vianshield/LogCatcherTest.kt`
+  - `BLUEPRINT.md`
+  - `receipts/RECEIPTS_001.md`
+- **What Was Done**:
+  - Implemented `LogCatcher` lightweight diagnostic backend with a hard 2 MiB storage cap in private internal storage (`vianshield_logs/current.log`).
+  - Added zero-PII filtering: never records DNS queries, packet bytes, browsing history, private keys, or tokens; never uploads logs to any server.
+  - Implemented abnormal process shutdown detection on startup via clean exit flag heuristic in SharedPreferences.
+  - Implemented automatic archival pending state when storage reaches 2 MiB, maintaining records until verified external export.
+  - Added on-demand `MemoryDiagnostics` test session sampling heap/PSS process memory every 15 seconds without persistent polling.
+  - Implemented `LogKeeperScreen` in Jetpack Compose showing formatted records, timestamps, severity badges, master switch, and export actions without adding a bottom navigation bar.
+  - Configured SAF document creation launcher (`CreateDocument("text/plain")`) in `MainActivity` with file naming pattern `Vianshield-Logs-YYYYMMDD-HHMMSS.txt` to safely export to Downloads across API 24–36 without broad storage permissions.
+  - Authored comprehensive test suite `LogCatcherTest` covering 2 MiB boundary enforcement, abnormal process termination, export failure retention, and export success working buffer reset.
+  - Preserved package name (`app.vian.vianshield`), application ID, minSdk (24), ABI filters (`arm64-v8a`, `armeabi-v7a`), and Firestack dependency.
+- **How It Was Verified**: Local build only. Verified via `compile_applet` (succeeded) and `gradle :app:testDebugUnitTest --rerun-tasks` (30 actionable tasks executed, 0 failures, all 9 unit and Robolectric tests passed).
+- **Deviations**: None. Did not commit or push.
+- **Known Issues / Follow-up**: Ready for user review and subsequent Phase 3 engine architecture alignment.
+
+## Entry 009
+- **Timestamp**: 2026-10-17T22:48:00-07:00
+- **Summary**: Remediated Phase 2 Log Catcher and Log Keeper audit issues (IO thread dispatch, combined directory size accounting, INFO-first pruning with emergency queue, lifecycle-aware memory sampling, uncaught JVM handler, and SAF partial document deletion).
+- **Exact Files Touched**:
+  - `app/src/main/java/app/vian/vianshield/logging/LogCatcher.kt`
+  - `app/src/main/java/app/vian/vianshield/logging/MemoryDiagnostics.kt`
+  - `app/src/main/java/app/vian/vianshield/logging/LogKeeperViewModel.kt`
+  - `app/src/main/java/app/vian/vianshield/ui/LogKeeperScreen.kt`
+  - `app/src/main/java/app/vian/vianshield/MainActivity.kt`
+  - `app/src/test/java/app/vian/vianshield/LogCatcherTest.kt`
+  - `BLUEPRINT.md`
+  - `receipts/RECEIPTS_001.md`
+- **What Was Done**:
+  - Moved log file reading and parsing in `LogKeeperViewModel` to `Dispatchers.IO` using `withContext(Dispatchers.IO)` with non-crashing safe exception handling.
+  - Implemented combined on-disk storage calculation in `LogCatcher` accounting for all files in `vianshield_logs/` (active, rotated, and temporary files) against the 2 MiB limit.
+  - Implemented pre-write record sizing: calculates incoming line bytes and frees room before appending.
+  - Added smart pruning: drops oldest `INFO` records first while protecting `WARN` and `ERROR` records.
+  - Implemented bounded in-memory emergency queue (max 50 entries) for critical records when disk is full of errors, alongside a tracked `droppedRecordsCount` counter displayed on the UI.
+  - Updated `MemoryDiagnostics` to sample memory strictly when user-enabled, master switch is on, and app is in foreground; paused automatically in background via Compose `DisposableEffect` lifecycle observation.
+  - Installed `Thread.setDefaultUncaughtExceptionHandler` in `LogCatcher` to record fatal JVM crash details safely before delegating to the previous system handler.
+  - Enhanced SAF export launcher in `MainActivity` to attempt `DocumentsContract.deleteDocument` on partial/corrupted files when write fails.
+  - Added unit and Robolectric tests in `LogCatcherTest` covering concurrent writes, oversized record truncation, combined directory size accounting, uncaught JVM handler, and memory diagnostics lifecycle pause/resume.
+- **How It Was Verified**: Local build only. Verified via `compile_applet` (succeeded) and `gradle :app:testDebugUnitTest --rerun-tasks` (30 actionable tasks executed, 0 errors, all 12 tests in `LogCatcherTest` and 14 total tests passed).
+- **Deviations**: None. Did not commit or push.
+- **Known Issues / Follow-up**: All audit findings remediated and verified.
+
+## Entry 010
+- **Timestamp**: 2026-10-18T00:26:00-07:00
+- **Summary**: Implemented Fix 1 (atomic export checkpoint with zero disk duplication and zero log loss) and Fix 2 (bounded crash handler with timed lock and emergency fallback path).
+- **Exact Files Touched**:
+  - `app/src/main/java/app/vian/vianshield/logging/LogCatcher.kt`
+  - `app/src/test/java/app/vian/vianshield/LogCatcherTest.kt`
+  - `BLUEPRINT.md`
+  - `receipts/RECEIPTS_001.md`
+- **What Was Done**:
+  - Fix 1 (Atomic Export Checkpoint): Implemented in-place POSIX file rename (`currentLogFile.renameTo(checkpointFile)`) in `LogCatcher.getExportPayload()` taking 0 additional disk bytes. Captured `inMemoryEmergencyQueue` and `droppedRecordsCount` into checkpoint snapshots. In `onExportSucceeded()`, deleted only `checkpointFile` and cleared checkpoint state; records written to `current.log` during the export window survive intact. On export failure, preserved checkpoint for retry.
+  - Fix 2 (Bounded Crash Handler): Replaced lock with `ReentrantLock(true)`. Added `recordCrashWithBoundedWait()` attempting `lock.tryLock(timeoutMs, TimeUnit.MILLISECONDS)`. If lock is contended (another thread stuck in disk I/O), falls back to direct emergency write (`emergency_crash.log`) within timeout, preventing deadlocks while always delegating to the previous system uncaught exception handler.
+  - Added 3 regression tests to `LogCatcherTest`: `test_concurrent_log_during_export_survives_after_export_succeeds`, `test_export_failure_and_successful_retry`, and `test_bounded_crash_handler_fallback_does_not_hang_when_lock_contended`.
+- **How It Was Verified**: Local build only. Verified via `compile_applet` (succeeded) and `gradle :app:testDebugUnitTest --rerun-tasks` (30 actionable tasks executed, 0 errors, all 15 tests in `LogCatcherTest` and 17 total tests passed).
+- **Deviations**: None. Did not commit or push.
+- **Known Issues / Follow-up**: Phase 2 Step 3 completed and verified with zero log loss and bounded crash safety.
+
+## Entry 011
+- **Timestamp**: 2026-10-20T14:10:00-07:00
+- **Summary**: Implemented Phase 4 Minimal WireGuard VPN milestone (parser, VpnService lifecycle, Firestack connect3/addProxy, truthful telemetry, and UI control card).
+- **Exact Files Touched**:
+  - `.gitignore`
+  - `app/src/main/AndroidManifest.xml`
+  - `app/src/main/res/values/strings.xml`
+  - `app/src/main/java/app/vian/vianshield/vpn/WireGuardConfig.kt`
+  - `app/src/main/java/app/vian/vianshield/vpn/WireGuardConfigStore.kt`
+  - `app/src/main/java/app/vian/vianshield/vpn/FirestackBridge.kt`
+  - `app/src/main/java/app/vian/vianshield/vpn/VpnState.kt`
+  - `app/src/main/java/app/vian/vianshield/vpn/VianshieldVpnService.kt`
+  - `app/src/main/java/app/vian/vianshield/MainActivity.kt`
+  - `app/src/test/java/app/vian/vianshield/WireGuardConfigTest.kt`
+  - `BLUEPRINT.md`
+  - `receipts/RECEIPTS_001.md`
+- **What Was Done**:
+  - Security hardening: Added `debug.keystore.base64` and `.build-outputs/` to `.gitignore`.
+  - Manifest & Service: Declared `INTERNET`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `POST_NOTIFICATIONS` permissions, and declared `VianshieldVpnService` with `specialUse` foreground service type and `BIND_VPN_SERVICE`.
+  - WireGuard Parsing: Built `WireGuardConfigParser` strictly validating single-peer `.conf` files, decoding 32-byte Base64 keys into 64-char lowercase hex strings, parsing addresses, DNS, MTU, endpoint, allowed IPs, and persistent keepalive, detecting IPv6 routing, and generating UAPI config strings for Firestack.
+  - State & Persistence: Created `VpnStateHolder` tracking truthful states (`DISCONNECTED`, `CONNECTING`, `CONNECTED_TRAFFIC_VERIFIED`, `CONNECTION_UNCONFIRMED`, `ERROR`) and `WireGuardConfigStore` storing active config in app-private storage.
+  - Bridge: Implemented `FirestackBridge` forwarding socket protection (`vpnService.protect()`), routing non-sensitive logs to `LogCatcher`, and returning valid non-null pass-through objects (`Mark()`, `PreMark()`, `DNSOpts(noblock=true)`, `Tab(block=false)`).
+  - VPN Service Lifecycle: Implemented `VianshieldVpnService` managing TUN interface creation, Firestack `Intra.experimentalWireGuard(true)`, `Intra.connect3()`, `proxies.addProxy()`, real-time TX/RX packet polling via `Tunnel.stat().ip()`, foreground service notification with disconnect action, and safe resource cleanup on disconnect/failure.
+  - UI & Dashboard: Integrated `WireGuardVpnCard` on `VianshieldHomeScreen` with `.conf` import launcher (`OpenDocument`), VPN consent launcher (`StartActivityForResult`), live packet counters, and routing indicator while keeping Log Keeper card and existing UI intact.
+  - Test Suite: Authored `WireGuardConfigTest` verifying parser, key formatting, IPv4/IPv6 classification, privacy sanitization, and state transitions.
+- **How It Was Verified**: Local build only. Verified via `compile_applet` (succeeded) and `gradle :app:testDebugUnitTest` (30 actionable tasks executed, 0 errors, `BUILD SUCCESSFUL in 49s`). All unit and Robolectric tests in `WireGuardConfigTest`, `LogCatcherTest`, and `ExampleRobolectricTest` passed.
+- **Deviations**: None. Adhered strictly to single-peer WireGuard VPN milestone without adding firewall rules, ad blocking, or custom DNS controls.
+- **Known Issues / Follow-up**: On-device verification with a live WireGuard peer using the On-Device Verification Guide.
+## Entry 012
+- **Timestamp**: 2026-10-20T14:52:00-07:00
+- **Summary**: Implemented Phase 4 critical audit fixes (truthful connection telemetry, safe one-time Gomobile runtime initialization, prompt synchronous foreground service startup, duplicate connect prevention, and safe socket protection failure handling).
+- **Exact Files Touched**:
+  - `app/src/main/java/app/vian/vianshield/vpn/GomobileRuntime.kt`
+  - `app/src/main/java/app/vian/vianshield/vpn/VpnState.kt`
+  - `app/src/main/java/app/vian/vianshield/vpn/FirestackBridge.kt`
+  - `app/src/main/java/app/vian/vianshield/vpn/VianshieldVpnService.kt`
+  - `app/src/main/res/values/strings.xml`
+  - `app/src/main/java/app/vian/vianshield/MainActivity.kt`
+  - `app/src/test/java/app/vian/vianshield/WireGuardConfigTest.kt`
+  - `BLUEPRINT.md`
+  - `receipts/RECEIPTS_001.md`
+- **What Was Done**:
+  - Fix 1 (Truthful Telemetry): Removed all claims that packet counters prove a handshake or remote traffic. Replaced `CONNECTED_TRAFFIC_VERIFIED` with `TUNNEL_ACTIVE_UNVERIFIED` and `CONNECTION_UNCONFIRMED`. Renamed packet telemetry to `localTunTxPackets` and `localTunRxPackets`, labeling UI and notification text explicitly as local TUN counters.
+  - Fix 2 (Gomobile Runtime Initialization): Verified `go.Seq.setContext(Context)` in pinned Firestack runtime. Implemented `GomobileRuntime` thread-safe singleton invoking `go.Seq.setContext(applicationContext)` exactly once before any Go/Firestack API call.
+  - Fix 3 (Prompt Synchronous Foreground Service Start): Moved `startForeground()` directly and synchronously into `onStartCommand()` before background coroutine dispatch, ensuring Android 14+ FGS startup deadline compliance under `specialUse`.
+  - Fix 4 (Duplicate Connection Prevention): Added thread-safe `ServiceLifecycleState` state machine (`IDLE`, `CONNECTING`, `ACTIVE`, `STOPPING`) to `VianshieldVpnService`. Repeated `ACTION_CONNECT` calls refresh current notification and return `START_STICKY` without spawning duplicate tunnels or leaking file descriptors. Idempotent resource cleanup ensures exact single release on teardown.
+  - Fix 5 (Socket Protection Failure Handling): Added `onProtectionFailed` callback to `FirestackBridge`. When `VpnService.protect(fd)` returns false, logs an `ERROR` and triggers safe asynchronous service teardown preventing outbound UDP routing loops, without throwing across Gomobile JNI or crashing the process.
+  - Test Suite: Updated `WireGuardConfigTest` to verify truthful state transitions, GomobileRuntime thread-safe one-time initialization, and FirestackBridge socket protection failure callback triggering.
+- **How It Was Verified**: Local build only. Verified via `compile_applet` (succeeded) and `gradle :app:testDebugUnitTest --rerun-tasks` (30 actionable tasks executed, 0 errors, `BUILD SUCCESSFUL in 57s`). All 28 unit and Robolectric tests in `WireGuardConfigTest` (11 tests), `LogCatcherTest` (15 tests), `ExampleRobolectricTest` (1 test), and `ExampleUnitTest` (1 test) passed.
+- **Deviations**: None. Targeted strictly the 5 audit remediation items without adding ad blocking, firewall rules, or unrequested refactoring.
+- **Known Issues / Follow-up**: Ready for controlled on-device verification with a live WireGuard peer using the On-Device Verification Guide.

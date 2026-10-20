@@ -1,0 +1,717 @@
+package app.vian.vianshield
+
+import android.app.Activity
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.net.VpnService
+import android.os.Build
+import android.os.Bundle
+import android.provider.OpenableColumns
+import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material.icons.filled.FileOpen
+import androidx.compose.material.icons.filled.HourglassEmpty
+import androidx.compose.material.icons.filled.Shield
+import androidx.compose.material.icons.filled.VpnKey
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
+import app.vian.vianshield.logging.LogCatcher
+import app.vian.vianshield.logging.LogKeeperViewModel
+import app.vian.vianshield.logging.LogLevel
+import app.vian.vianshield.ui.LogKeeperScreen
+import app.vian.vianshield.ui.theme.VianshieldTheme
+import app.vian.vianshield.vpn.VianshieldVpnService
+import app.vian.vianshield.vpn.VpnConnectionState
+import app.vian.vianshield.vpn.VpnStateHolder
+import app.vian.vianshield.vpn.VpnUiState
+import app.vian.vianshield.vpn.WireGuardConfigParser
+import app.vian.vianshield.vpn.WireGuardConfigStore
+import java.io.BufferedReader
+import java.io.InputStreamReader
+import java.io.OutputStreamWriter
+import java.nio.charset.StandardCharsets
+
+enum class AppDestination {
+  HOME,
+  LOG_KEEPER
+}
+
+class MainActivity : ComponentActivity() {
+
+  override fun onCreate(savedInstanceState: Bundle?) {
+    super.onCreate(savedInstanceState)
+    enableEdgeToEdge()
+
+    // Initialize LogCatcher lifecycle and process monitoring
+    LogCatcher.getInstance(this).initializeProcess()
+
+    // Initialize Gomobile runtime context safely
+    app.vian.vianshield.vpn.GomobileRuntime.init(this)
+
+    // Load persisted configuration from private internal storage
+    val initialConfig = WireGuardConfigStore(this).loadConfig()
+    if (initialConfig != null) {
+      VpnStateHolder.updateConfig(initialConfig)
+    }
+
+    setContent {
+      VianshieldTheme {
+        val logKeeperViewModel: LogKeeperViewModel = viewModel()
+        var currentDestination by remember { mutableStateOf(AppDestination.HOME) }
+        val context = LocalContext.current
+        val vpnUiState by VpnStateHolder.state.collectAsState()
+
+        val exportLauncher = rememberLauncherForActivityResult(
+          contract = ActivityResultContracts.CreateDocument("text/plain")
+        ) { uri: Uri? ->
+          if (uri != null) {
+            try {
+              context.contentResolver.openOutputStream(uri)?.use { os ->
+                OutputStreamWriter(os, StandardCharsets.UTF_8).use { writer ->
+                  writer.write(logKeeperViewModel.getExportContent())
+                  writer.flush()
+                }
+              }
+              logKeeperViewModel.onExportSucceeded()
+              Toast.makeText(context, "Logs successfully exported and working buffer archived.", Toast.LENGTH_LONG).show()
+            } catch (e: Exception) {
+              try {
+                android.provider.DocumentsContract.deleteDocument(context.contentResolver, uri)
+              } catch (_: Exception) {
+                // Provider may not support delete
+              }
+              logKeeperViewModel.onExportFailed(e.message ?: "Write failed")
+              Toast.makeText(context, "Failed to export logs: ${e.message}", Toast.LENGTH_SHORT).show()
+            }
+          } else {
+            logKeeperViewModel.onExportFailed("User canceled document creation")
+          }
+        }
+
+        // VPN consent request launcher
+        val vpnConsentLauncher = rememberLauncherForActivityResult(
+          contract = ActivityResultContracts.StartActivityForResult()
+        ) { result ->
+          if (result.resultCode == Activity.RESULT_OK) {
+            VianshieldVpnService.start(context)
+          } else {
+            LogCatcher.getInstance(context).log(LogLevel.WARN, "MainActivity", "VPN consent denied by user.")
+            Toast.makeText(context, "VPN permission required to establish tunnel.", Toast.LENGTH_SHORT).show()
+          }
+        }
+
+        // Document picker launcher for standard WireGuard .conf file
+        val importConfLauncher = rememberLauncherForActivityResult(
+          contract = ActivityResultContracts.OpenDocument()
+        ) { uri: Uri? ->
+          if (uri != null) {
+            try {
+              var fileName = "tunnel.conf"
+              context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex >= 0 && cursor.moveToFirst()) {
+                  fileName = cursor.getString(nameIndex) ?: "tunnel.conf"
+                }
+              }
+
+              val content = context.contentResolver.openInputStream(uri)?.use { stream ->
+                BufferedReader(InputStreamReader(stream, StandardCharsets.UTF_8)).readText()
+              } ?: throw IllegalArgumentException("Could not read selected document.")
+
+              val parsedConfig = WireGuardConfigParser.parse(content, fileName)
+              WireGuardConfigStore(context).saveConfig(content, fileName)
+              VpnStateHolder.updateConfig(parsedConfig)
+              LogCatcher.getInstance(context).log(
+                LogLevel.INFO,
+                "MainActivity",
+                "Imported WireGuard configuration: ${parsedConfig.toSanitizedSummary()}"
+              )
+              Toast.makeText(context, "Imported $fileName successfully.", Toast.LENGTH_SHORT).show()
+            } catch (e: Exception) {
+              LogCatcher.getInstance(context).log(
+                LogLevel.ERROR,
+                "MainActivity",
+                "Failed to import WireGuard configuration: ${e.message}"
+              )
+              Toast.makeText(context, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+          }
+        }
+
+        // Observe foreground/background lifecycle to pause memory diagnostics in background
+        val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+        androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+          val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            when (event) {
+              androidx.lifecycle.Lifecycle.Event.ON_START -> logKeeperViewModel.onAppForegroundChanged(true)
+              androidx.lifecycle.Lifecycle.Event.ON_STOP -> logKeeperViewModel.onAppForegroundChanged(false)
+              else -> {}
+            }
+          }
+          lifecycleOwner.lifecycle.addObserver(observer)
+          onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+          }
+        }
+
+        when (currentDestination) {
+          AppDestination.HOME -> {
+            VianshieldHomeScreen(
+              vpnState = vpnUiState,
+              onOpenLogKeeper = { currentDestination = AppDestination.LOG_KEEPER },
+              onExportRequested = {
+                exportLauncher.launch(logKeeperViewModel.getExportFileName())
+              },
+              onImportConfRequested = {
+                importConfLauncher.launch(arrayOf("*/*", "application/octet-stream", "text/plain"))
+              },
+              onConnectRequested = {
+                val prepareIntent = VpnService.prepare(context)
+                if (prepareIntent != null) {
+                  vpnConsentLauncher.launch(prepareIntent)
+                } else {
+                  VianshieldVpnService.start(context)
+                }
+              },
+              onDisconnectRequested = {
+                VianshieldVpnService.stop(context)
+              },
+              logKeeperViewModel = logKeeperViewModel
+            )
+          }
+          AppDestination.LOG_KEEPER -> {
+            BackHandler {
+              currentDestination = AppDestination.HOME
+            }
+            LogKeeperScreen(
+              viewModel = logKeeperViewModel,
+              onNavigateBack = { currentDestination = AppDestination.HOME },
+              onRequestExport = {
+                exportLauncher.launch(logKeeperViewModel.getExportFileName())
+              }
+            )
+          }
+        }
+      }
+    }
+  }
+
+  override fun onDestroy() {
+    super.onDestroy()
+    LogCatcher.getInstance(this).markCleanShutdown()
+  }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun VianshieldHomeScreen(
+  vpnState: VpnUiState = VpnUiState(),
+  onOpenLogKeeper: () -> Unit = {},
+  onExportRequested: () -> Unit = {},
+  onImportConfRequested: () -> Unit = {},
+  onConnectRequested: () -> Unit = {},
+  onDisconnectRequested: () -> Unit = {},
+  logKeeperViewModel: LogKeeperViewModel? = null,
+  modifier: Modifier = Modifier
+) {
+  val isArchivalPending = logKeeperViewModel?.isArchivalPending?.collectAsState()?.value ?: false
+
+  Scaffold(
+    modifier = modifier
+      .fillMaxSize()
+      .testTag("vianshield_root_scaffold"),
+    topBar = {
+      CenterAlignedTopAppBar(
+        title = {
+          Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+          ) {
+            Icon(
+              imageVector = Icons.Default.Shield,
+              contentDescription = stringResource(id = R.string.title_vianshield),
+              tint = MaterialTheme.colorScheme.primary,
+              modifier = Modifier.size(24.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+              text = stringResource(id = R.string.title_vianshield),
+              style = MaterialTheme.typography.titleLarge,
+              fontWeight = FontWeight.Bold,
+              modifier = Modifier.testTag("app_title_text")
+            )
+          }
+        },
+        actions = {
+          IconButton(
+            onClick = onOpenLogKeeper,
+            modifier = Modifier.testTag("btn_top_log_keeper")
+          ) {
+            Icon(
+              imageVector = Icons.Default.Description,
+              contentDescription = stringResource(id = R.string.action_open_log_keeper),
+              tint = if (isArchivalPending) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant
+            )
+          }
+        },
+        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+          containerColor = MaterialTheme.colorScheme.surface
+        )
+      )
+    }
+  ) { innerPadding ->
+    Box(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(innerPadding)
+        .padding(horizontal = 24.dp),
+      contentAlignment = Alignment.Center
+    ) {
+      Column(
+        modifier = Modifier
+          .widthIn(max = 480.dp)
+          .fillMaxWidth()
+          .testTag("main_content_column"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
+      ) {
+        // App Identity Shield Badge
+        Surface(
+          modifier = Modifier
+            .size(72.dp)
+            .testTag("app_shield_badge"),
+          shape = CircleShape,
+          color = MaterialTheme.colorScheme.primaryContainer,
+          tonalElevation = 2.dp
+        ) {
+          Box(contentAlignment = Alignment.Center) {
+            Icon(
+              imageVector = Icons.Default.Shield,
+              contentDescription = "Shield Icon",
+              tint = MaterialTheme.colorScheme.onPrimaryContainer,
+              modifier = Modifier.size(40.dp)
+            )
+          }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        Text(
+          text = stringResource(id = R.string.title_vianshield),
+          style = MaterialTheme.typography.headlineMedium,
+          fontWeight = FontWeight.ExtraBold,
+          color = MaterialTheme.colorScheme.onSurface,
+          modifier = Modifier.testTag("hero_title_text")
+        )
+
+        Spacer(modifier = Modifier.height(6.dp))
+
+        Surface(
+          shape = RoundedCornerShape(12.dp),
+          color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
+        ) {
+          Text(
+            text = "Phase 4 • Minimal WireGuard VPN",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSecondaryContainer,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+          )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // WireGuard VPN Card
+        WireGuardVpnCard(
+          vpnState = vpnState,
+          onImportConfRequested = onImportConfRequested,
+          onConnectRequested = onConnectRequested,
+          onDisconnectRequested = onDisconnectRequested
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // Diagnostic & Archival Status Card (Log Keeper)
+        Card(
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("diagnostic_status_card"),
+          colors = CardDefaults.cardColors(
+            containerColor = if (isArchivalPending) {
+              MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
+            } else {
+              MaterialTheme.colorScheme.surface
+            }
+          ),
+          shape = RoundedCornerShape(16.dp)
+        ) {
+          Column(
+            modifier = Modifier
+              .fillMaxWidth()
+              .padding(16.dp)
+          ) {
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.SpaceBetween,
+              verticalAlignment = Alignment.CenterVertically
+            ) {
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                  imageVector = if (isArchivalPending) Icons.Default.Warning else Icons.Default.Description,
+                  contentDescription = null,
+                  tint = if (isArchivalPending) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary,
+                  modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                  text = "Log Keeper",
+                  style = MaterialTheme.typography.titleSmall,
+                  fontWeight = FontWeight.Bold,
+                  color = MaterialTheme.colorScheme.onSurface
+                )
+              }
+              Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = if (isArchivalPending) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer
+              ) {
+                Text(
+                  text = if (isArchivalPending) "Archival Pending" else "Active (Cap: 2 MiB)",
+                  style = MaterialTheme.typography.labelSmall,
+                  color = if (isArchivalPending) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer,
+                  modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+              }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            Text(
+              text = if (isArchivalPending) {
+                "Internal log buffer has reached the 2 MiB limit. Export to Downloads is pending."
+              } else {
+                "Lightweight on-device diagnostic capture active. Zero telemetry or network transmissions."
+              },
+              style = MaterialTheme.typography.bodySmall,
+              color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(
+              modifier = Modifier.fillMaxWidth(),
+              horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+              OutlinedButton(
+                onClick = onOpenLogKeeper,
+                modifier = Modifier
+                  .weight(1f)
+                  .testTag("btn_view_logs")
+              ) {
+                Text("View Logs")
+              }
+              if (isArchivalPending) {
+                Button(
+                  onClick = onExportRequested,
+                  modifier = Modifier
+                    .weight(1f)
+                    .testTag("btn_home_export_now")
+                ) {
+                  Text("Export Now")
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+@Composable
+fun WireGuardVpnCard(
+  vpnState: VpnUiState,
+  onImportConfRequested: () -> Unit,
+  onConnectRequested: () -> Unit,
+  onDisconnectRequested: () -> Unit,
+  modifier: Modifier = Modifier
+) {
+  val config = vpnState.config
+  val state = vpnState.connectionState
+
+  Card(
+    modifier = modifier
+      .fillMaxWidth()
+      .testTag("status_card"),
+    colors = CardDefaults.cardColors(
+      containerColor = MaterialTheme.colorScheme.surfaceVariant
+    ),
+    shape = RoundedCornerShape(16.dp)
+  ) {
+    Column(
+      modifier = Modifier
+        .fillMaxWidth()
+        .padding(18.dp)
+    ) {
+      // Header: Title + Routing Label
+      Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+      ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          Icon(
+            imageVector = Icons.Default.VpnKey,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(20.dp)
+          )
+          Spacer(modifier = Modifier.width(8.dp))
+          Text(
+            text = stringResource(id = R.string.vpn_section_title),
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+          )
+        }
+
+        if (config != null) {
+          Surface(
+            shape = RoundedCornerShape(6.dp),
+            color = if (config.isIpv6Configured) {
+              MaterialTheme.colorScheme.primaryContainer
+            } else {
+              MaterialTheme.colorScheme.tertiaryContainer
+            }
+          ) {
+            Text(
+              text = if (config.isIpv6Configured) "Dual-stack" else "IPv4 only",
+              style = MaterialTheme.typography.labelSmall,
+              color = if (config.isIpv6Configured) {
+                MaterialTheme.colorScheme.onPrimaryContainer
+              } else {
+                MaterialTheme.colorScheme.onTertiaryContainer
+              },
+              modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+            )
+          }
+        }
+      }
+
+      Spacer(modifier = Modifier.height(12.dp))
+
+      if (config == null) {
+        // Empty State: Prompt user to import configuration
+        Text(
+          text = stringResource(id = R.string.no_config_loaded),
+          style = MaterialTheme.typography.bodyMedium,
+          color = MaterialTheme.colorScheme.onSurfaceVariant,
+          modifier = Modifier.testTag("firewall_status_text")
+        )
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        Button(
+          onClick = onImportConfRequested,
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("btn_import_conf")
+        ) {
+          Icon(
+            imageVector = Icons.Default.FileOpen,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp)
+          )
+          Spacer(modifier = Modifier.width(8.dp))
+          Text(stringResource(id = R.string.action_import_conf))
+        }
+      } else {
+        // Configured State
+        Text(
+          text = "Config: ${config.originalFileName} (${config.peerEndpoint})",
+          style = MaterialTheme.typography.bodySmall,
+          fontWeight = FontWeight.Medium,
+          color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // Connection State Badge
+        val (badgeColor, textColor, stateText, icon) = when (state) {
+          VpnConnectionState.DISCONNECTED -> Quad(
+            MaterialTheme.colorScheme.surface,
+            MaterialTheme.colorScheme.onSurface,
+            stringResource(id = R.string.status_disconnected),
+            Icons.Default.Shield
+          )
+          VpnConnectionState.CONNECTING -> Quad(
+            MaterialTheme.colorScheme.secondaryContainer,
+            MaterialTheme.colorScheme.onSecondaryContainer,
+            stringResource(id = R.string.status_connecting),
+            Icons.Default.HourglassEmpty
+          )
+          VpnConnectionState.TUNNEL_ACTIVE_UNVERIFIED -> Quad(
+            MaterialTheme.colorScheme.primaryContainer,
+            MaterialTheme.colorScheme.onPrimaryContainer,
+            stringResource(id = R.string.status_tunnel_active_unverified),
+            Icons.Default.CheckCircle
+          )
+          VpnConnectionState.CONNECTION_UNCONFIRMED -> Quad(
+            MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.7f),
+            MaterialTheme.colorScheme.onErrorContainer,
+            stringResource(id = R.string.status_connection_unconfirmed),
+            Icons.Default.Warning
+          )
+          VpnConnectionState.ERROR -> Quad(
+            MaterialTheme.colorScheme.errorContainer,
+            MaterialTheme.colorScheme.onErrorContainer,
+            vpnState.errorMessage ?: stringResource(id = R.string.status_error),
+            Icons.Default.Error
+          )
+        }
+
+        Surface(
+          shape = RoundedCornerShape(8.dp),
+          color = badgeColor,
+          modifier = Modifier.fillMaxWidth()
+        ) {
+          Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+          ) {
+            Icon(
+              imageVector = icon,
+              contentDescription = null,
+              tint = textColor,
+              modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+              text = stateText,
+              style = MaterialTheme.typography.labelMedium,
+              fontWeight = FontWeight.SemiBold,
+              color = textColor,
+              modifier = Modifier.testTag("firewall_status_text")
+            )
+          }
+        }
+
+        if (state == VpnConnectionState.TUNNEL_ACTIVE_UNVERIFIED ||
+          state == VpnConnectionState.CONNECTING ||
+          state == VpnConnectionState.CONNECTION_UNCONFIRMED
+        ) {
+          Spacer(modifier = Modifier.height(8.dp))
+          Text(
+            text = stringResource(id = R.string.traffic_stats, vpnState.localTunTxPackets, vpnState.localTunRxPackets),
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.testTag("traffic_stats_text")
+          )
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
+
+        // Action Buttons
+        Row(
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+          if (state == VpnConnectionState.DISCONNECTED || state == VpnConnectionState.ERROR) {
+            Button(
+              onClick = onConnectRequested,
+              modifier = Modifier
+                .weight(1f)
+                .testTag("btn_vpn_connect")
+            ) {
+              Text(if (state == VpnConnectionState.ERROR) "Retry" else stringResource(id = R.string.action_connect))
+            }
+            OutlinedButton(
+              onClick = onImportConfRequested,
+              modifier = Modifier
+                .weight(1f)
+                .testTag("btn_change_conf")
+            ) {
+              Text(stringResource(id = R.string.action_change_conf))
+            }
+          } else {
+            FilledTonalButton(
+              onClick = onDisconnectRequested,
+              colors = ButtonDefaults.filledTonalButtonColors(
+                containerColor = MaterialTheme.colorScheme.errorContainer,
+                contentColor = MaterialTheme.colorScheme.onErrorContainer
+              ),
+              modifier = Modifier
+                .fillMaxWidth()
+                .testTag("btn_vpn_disconnect")
+            ) {
+              Text(stringResource(id = R.string.action_disconnect))
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+private data class Quad<A, B, C, D>(val first: A, val second: B, val third: C, val fourth: D)
+
+@Preview(showBackground = true)
+@Composable
+fun VianshieldHomeScreenPreview() {
+  VianshieldTheme {
+    VianshieldHomeScreen()
+  }
+}
