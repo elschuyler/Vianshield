@@ -87,3 +87,17 @@ Vianshield is a lean, native Android security utility designed to run efficientl
     - *Fix 5 (Socket Protection Failure Handling)*: Added `onProtectionFailed` callback to `FirestackBridge`. When `VpnService.protect(fd)` fails, logs an ERROR and triggers safe asynchronous service teardown, preventing UDP routing loops without throwing across Gomobile JNI or crashing the process.
   - Updated `MainActivity` and `VianshieldHomeScreen` with WireGuard VPN card, document picker launcher (`OpenDocument`), VPN consent launcher (`StartActivityForResult`), and honest status badges.
   - Authored and updated test suite `WireGuardConfigTest` verifying parser, key formatting, IPv4/IPv6 classification, truthful state transitions, GomobileRuntime idempotency, and bridge protection failure handling.
+- **2026-10-21 (Critical Stability and VPN Permission Flow Fix)**:
+  - *Root Cause Analysis*: An unbounded `BufferedReader.readText()` on an accidentally imported `.slm` (Small Language Model) file triggered an `OutOfMemoryError` allocation failure (~134 MB allocation vs. 128 MB heap growth limit). Concurrently, rapid repeated taps on the "Connect" button re-invoked `ActivityResultLauncher.launch()` while consent was in flight, causing Android to cancel previous requests with `RESULT_CANCELED` and falsely logging "VPN consent denied by user".
+  - *Task 1 & Task 2 (Safe Bounded Configuration Import)*:
+    - Added preliminary `.conf` file extension check before opening stream bytes.
+    - Added `OpenableColumns.SIZE` check and bounded stream reader strictly capped at `MAX_CONFIG_SIZE_BYTES` (64 KiB) to make oversized or binary file imports impossible to allocate large buffers.
+    - Added binary byte rejection (NUL characters) and strict WireGuard section validation (`[Interface]` and `[Peer]`), producing clean error messages ("Unsupported file — choose a WireGuard .conf file.").
+    - Added `OutOfMemoryError` interceptor boundary.
+    - Guaranteed profile preservation: failed imports never overwrite or clear the active profile in memory or disk.
+  - *Task 3 (VPN Permission Flow & In-Flight Debounce)*:
+    - Introduced `isConsentPending` state in `MainActivity`.
+    - Guarded `onConnectRequested` against duplicate clicks while consent or connection is in flight.
+    - Disabled Connect button with "Awaiting Permission…" status text while the system consent dialog is pending.
+    - Handled `Activity.RESULT_OK` (starts VPN) and `Activity.RESULT_CANCELED` (accurate non-granted warning toast) cleanly without false "denied" reports or repeated launcher calls.
+  - Added 6 new regression unit tests in `WireGuardConfigTest` (invalid extensions, empty text, >64 KB oversized configs, arbitrary documents, binary NUL bytes, and profile preservation). Total 34 tests passing (100%).

@@ -67,6 +67,8 @@ data class WireGuardConfig(
 
 object WireGuardConfigParser {
 
+  /** Maximum allowed size in bytes for a WireGuard text configuration (64 KiB). */
+  const val MAX_CONFIG_SIZE_BYTES = 64 * 1024
   private const val KEY_LEN_BYTES = 32
   private const val KEY_HEX_CHARS = 64
   private const val DEFAULT_MTU = 1420
@@ -77,6 +79,29 @@ object WireGuardConfigParser {
    * @throws IllegalArgumentException if the configuration is invalid or unsupported.
    */
   fun parse(content: String, fileName: String = "tunnel.conf"): WireGuardConfig {
+    // 1. Validate file extension preliminary check
+    if (!fileName.endsWith(".conf", ignoreCase = true)) {
+      throw IllegalArgumentException("Unsupported file — choose a WireGuard .conf file.")
+    }
+
+    // 2. Reject empty or oversized configurations
+    if (content.isBlank()) {
+      throw IllegalArgumentException("Unsupported file — choose a WireGuard .conf file.")
+    }
+    if (content.length > MAX_CONFIG_SIZE_BYTES) {
+      throw IllegalArgumentException("File exceeds maximum size of 64 KB — choose a valid WireGuard .conf file.")
+    }
+
+    // 3. Reject binary documents (e.g. .slm, .bin, .so)
+    if (content.contains('\u0000')) {
+      throw IllegalArgumentException("Unsupported file — binary data detected. Choose a valid WireGuard .conf file.")
+    }
+
+    // 4. Validate essential WireGuard section headers
+    if (!content.contains("[Interface]", ignoreCase = true) || !content.contains("[Peer]", ignoreCase = true)) {
+      throw IllegalArgumentException("Unsupported file — choose a WireGuard .conf file.")
+    }
+
     var inInterface = false
     var inPeer = false
     var peerCount = 0

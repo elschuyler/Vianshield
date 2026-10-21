@@ -3,6 +3,7 @@ package app.vian.vianshield
 import app.vian.vianshield.vpn.VpnConnectionState
 import app.vian.vianshield.vpn.VpnStateHolder
 import app.vian.vianshield.vpn.WireGuardConfigParser
+import app.vian.vianshield.vpn.WireGuardConfigStore
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
@@ -274,5 +275,127 @@ class WireGuardConfigTest {
     assertTrue("onProtectionFailed callback must be invoked when protect() returns false", callbackInvoked)
     assertEquals(42L, reportedFd)
     assertEquals("udp", reportedPath)
+  }
+
+  @Test
+  fun `reject configuration with invalid file extension`() {
+    val validConf = """
+      [Interface]
+      PrivateKey = $validBase64Key1
+      Address = 10.0.0.2/32
+      [Peer]
+      PublicKey = $validBase64Key2
+      Endpoint = 198.51.100.1:51820
+    """.trimIndent()
+
+    val invalidFileNames = listOf("model.slm", "config.txt", "tunnel.bin", "archive.zip", "test.conf.bak")
+    for (invalidName in invalidFileNames) {
+      try {
+        WireGuardConfigParser.parse(validConf, invalidName)
+        fail("Expected IllegalArgumentException for invalid extension: $invalidName")
+      } catch (e: IllegalArgumentException) {
+        assertTrue(e.message?.contains("Unsupported file — choose a WireGuard .conf file") == true)
+      }
+    }
+  }
+
+  @Test
+  fun `reject empty or whitespace configuration`() {
+    try {
+      WireGuardConfigParser.parse("   \n\t  ", "tunnel.conf")
+      fail("Expected IllegalArgumentException for empty configuration")
+    } catch (e: IllegalArgumentException) {
+      assertTrue(e.message?.contains("Unsupported file") == true)
+    }
+  }
+
+  @Test
+  fun `reject configuration exceeding 64 KB size limit`() {
+    val validBase = """
+      [Interface]
+      PrivateKey = $validBase64Key1
+      Address = 10.0.0.2/32
+      [Peer]
+      PublicKey = $validBase64Key2
+      Endpoint = 198.51.100.1:51820
+    """.trimIndent()
+
+    // Pad with comments to exceed 64 KB
+    val oversizedConf = validBase + "\n" + "# oversized comment line ".repeat(3000)
+    assertTrue("Oversized content must exceed 64 KB", oversizedConf.length > WireGuardConfigParser.MAX_CONFIG_SIZE_BYTES)
+
+    try {
+      WireGuardConfigParser.parse(oversizedConf, "oversized.conf")
+      fail("Expected IllegalArgumentException for oversized configuration")
+    } catch (e: IllegalArgumentException) {
+      assertTrue(e.message?.contains("exceeds maximum size") == true)
+    }
+  }
+
+  @Test
+  fun `reject arbitrary document missing WireGuard sections`() {
+    val arbitraryText = "This is a random text document without wireguard sections.\nKey = Value\n"
+    try {
+      WireGuardConfigParser.parse(arbitraryText, "tunnel.conf")
+      fail("Expected IllegalArgumentException for arbitrary document missing sections")
+    } catch (e: IllegalArgumentException) {
+      assertTrue(e.message?.contains("Unsupported file") == true)
+    }
+  }
+
+  @Test
+  fun `reject binary content containing NUL bytes`() {
+    val binaryContent = "[Interface]\u0000PrivateKey=$validBase64Key1\nAddress=10.0.0.2/32\n[Peer]\nPublicKey=$validBase64Key2\nEndpoint=1.1.1.1:51820"
+    try {
+      WireGuardConfigParser.parse(binaryContent, "binary.conf")
+      fail("Expected IllegalArgumentException for binary content")
+    } catch (e: IllegalArgumentException) {
+      assertTrue(e.message?.contains("binary data detected") == true)
+    }
+  }
+
+  @Test
+  fun `failed import preserves previous valid profile in store and state`() {
+    val context = androidx.test.core.app.ApplicationProvider.getApplicationContext<android.content.Context>()
+    val store = WireGuardConfigStore(context)
+    store.clear()
+
+    // 1. Establish initial valid configuration
+    val initialConf = """
+      [Interface]
+      PrivateKey = $validBase64Key1
+      Address = 10.0.0.2/32
+      [Peer]
+      PublicKey = $validBase64Key2
+      Endpoint = 198.51.100.1:51820
+    """.trimIndent()
+
+    val initialConfig = WireGuardConfigParser.parse(initialConf, "primary.conf")
+    store.saveConfig(initialConf, "primary.conf")
+    VpnStateHolder.updateConfig(initialConfig)
+
+    assertEquals("primary.conf", VpnStateHolder.state.value.config?.originalFileName)
+    assertEquals("198.51.100.1:51820", VpnStateHolder.state.value.config?.peerEndpoint)
+    assertEquals("primary.conf", store.loadConfig()?.originalFileName)
+
+    // 2. Attempt invalid import (e.g. .slm model file or malformed text)
+    val invalidSlmContent = "SLM_WEIGHTS_BINARY_BLOB"
+    try {
+      WireGuardConfigParser.parse(invalidSlmContent, "model.slm")
+      fail("Must reject invalid .slm file")
+    } catch (_: IllegalArgumentException) {
+      // Expected failure: do not update store or state
+    }
+
+    // 3. Verify previous valid profile is strictly preserved
+    val currentActiveConfig = VpnStateHolder.state.value.config
+    assertNotNull("Previous valid profile must remain active in memory", currentActiveConfig)
+    assertEquals("primary.conf", currentActiveConfig?.originalFileName)
+    assertEquals("198.51.100.1:51820", currentActiveConfig?.peerEndpoint)
+
+    val currentStoredConfig = store.loadConfig()
+    assertNotNull("Previous valid profile must remain stored on disk", currentStoredConfig)
+    assertEquals("primary.conf", currentStoredConfig?.originalFileName)
+    assertEquals("198.51.100.1:51820", currentStoredConfig?.peerEndpoint)
   }
 }

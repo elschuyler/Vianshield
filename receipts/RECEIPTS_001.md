@@ -289,3 +289,20 @@
 - **How It Was Verified**: Local build only. Verified via `compile_applet` (succeeded) and `gradle :app:testDebugUnitTest --rerun-tasks` (30 actionable tasks executed, 0 errors, `BUILD SUCCESSFUL in 57s`). All 28 unit and Robolectric tests in `WireGuardConfigTest` (11 tests), `LogCatcherTest` (15 tests), `ExampleRobolectricTest` (1 test), and `ExampleUnitTest` (1 test) passed.
 - **Deviations**: None. Targeted strictly the 5 audit remediation items without adding ad blocking, firewall rules, or unrequested refactoring.
 - **Known Issues / Follow-up**: Ready for controlled on-device verification with a live WireGuard peer using the On-Device Verification Guide.
+## Entry 013
+- **Timestamp**: 2026-10-21T00:52:00-07:00
+- **Summary**: Remediated real-device failures: resolved file import OutOfMemoryError, enforced safe bounded WireGuard profile validation, and debounced VPN consent permission flow.
+- **Exact Files Touched**:
+  - `app/src/main/java/app/vian/vianshield/MainActivity.kt`
+  - `app/src/main/java/app/vian/vianshield/vpn/WireGuardConfig.kt`
+  - `app/src/main/res/values/strings.xml`
+  - `app/src/test/java/app/vian/vianshield/WireGuardConfigTest.kt`
+  - `BLUEPRINT.md`
+  - `receipts/RECEIPTS_001.md`
+- **What Was Done**:
+  - Task 1 & 2 (Memory Crash & Safe Import): Traced import memory crash to unbounded reading of arbitrary documents (e.g. large `.slm` model files) exceeding Dalvik/ART 128 MB heap limit. Implemented strict preliminary file extension validation (`.conf`), content provider size query check against `MAX_CONFIG_SIZE_BYTES` (64 KiB), and bounded streaming reader reading in 1024-char chunks strictly capped at 64 KiB. Added binary NUL byte rejection, required `[Interface]` and `[Peer]` section validation, and last-resort OutOfMemoryError boundary. Guaranteed profile preservation: failed imports never overwrite or wipe existing valid in-memory or persisted configuration. Secrets are strictly protected (private keys and preshared keys are never logged or exposed in exceptions).
+  - Task 3 (VPN Permission Flow & Rapid Tap Debounce): Resolved repeated "VPN consent denied by user" error. Rapid repeated taps on "Connect" previously triggered concurrent `ActivityResultLauncher.launch()` invocations while the system VPN dialog was pending, causing Android to immediately cancel previous requests with `RESULT_CANCELED`. Introduced `isConsentPending` debouncing state in `MainActivity`, disabled the Connect button with "Awaiting Permission…" status text while the system dialog is displayed, and cleanly handled `Activity.RESULT_OK` (starts VPN) and `Activity.RESULT_CANCELED` (warning toast) without false "denied" reports or repeated launcher calls.
+  - Unit Tests: Added 6 new unit tests to `WireGuardConfigTest` covering invalid extensions (.slm, .bin, .txt, etc.), empty content, >64 KB oversized configs, arbitrary documents missing sections, binary content containing NUL bytes, and profile preservation during failed imports.
+- **How It Was Verified**: Local build only. Verified via `compile_applet` (succeeded) and `gradle :app:testDebugUnitTest --rerun-tasks` (30 actionable tasks executed, 0 errors, `BUILD SUCCESSFUL in 59s`). All 34 unit and Robolectric tests in `WireGuardConfigTest` (17 tests), `LogCatcherTest` (15 tests), `ExampleRobolectricTest` (1 test), and `ExampleUnitTest` (1 test) passed with 100% success rate.
+- **Deviations**: None. No new unrequested features or refactoring added.
+- **Known Issues / Follow-up**: Ready for on-device testing of configuration import and VPN consent granting with the updated APK.

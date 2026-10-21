@@ -32,4 +32,7 @@
     <string name="routing_ipv4_only">Routing: IPv4 only (IPv6 traffic not routed)</string>
     <string name="routing_dual_stack">Routing: Dual-stack (IPv4 &amp; IPv6)</string>
     <string name="traffic_stats">Local TUN: TX: %1$d pkts | RX: %2$d pkts</string>
+    <string name="unsupported_file_error">Unsupported file — choose a WireGuard .conf file.</string>
+    <string name="vpn_permission_denied">VPN permission was not granted. Please allow the VPN connection to connect.</string>
+    <string name="awaiting_vpn_permission">Awaiting Permission…</string>
 </resources>

@@ -142,15 +142,31 @@ class MainActivity : ComponentActivity() {
           }
         }
 
+        var isConsentPending by remember { mutableStateOf(false) }
+
         // VPN consent request launcher
         val vpnConsentLauncher = rememberLauncherForActivityResult(
           contract = ActivityResultContracts.StartActivityForResult()
         ) { result ->
+          isConsentPending = false
           if (result.resultCode == Activity.RESULT_OK) {
-            VianshieldVpnService.start(context)
+            LogCatcher.getInstance(context).log(
+              LogLevel.INFO,
+              "MainActivity",
+              "VPN consent granted by user. Starting VianshieldVpnService."
+            )
+            VianshieldVpnService.start(this@MainActivity)
           } else {
-            LogCatcher.getInstance(context).log(LogLevel.WARN, "MainActivity", "VPN consent denied by user.")
-            Toast.makeText(context, "VPN permission required to establish tunnel.", Toast.LENGTH_SHORT).show()
+            LogCatcher.getInstance(context).log(
+              LogLevel.WARN,
+              "MainActivity",
+              "VPN consent not granted (resultCode=${result.resultCode})."
+            )
+            Toast.makeText(
+              context,
+              getString(R.string.vpn_permission_denied),
+              Toast.LENGTH_LONG
+            ).show()
           }
         }
 
@@ -161,33 +177,80 @@ class MainActivity : ComponentActivity() {
           if (uri != null) {
             try {
               var fileName = "tunnel.conf"
-              context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+              var reportedSize: Long = -1L
+              context.contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+                null,
+                null,
+                null
+              )?.use { cursor ->
                 val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (nameIndex >= 0 && cursor.moveToFirst()) {
-                  fileName = cursor.getString(nameIndex) ?: "tunnel.conf"
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (cursor.moveToFirst()) {
+                  if (nameIndex >= 0) {
+                    fileName = cursor.getString(nameIndex) ?: "tunnel.conf"
+                  }
+                  if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) {
+                    reportedSize = cursor.getLong(sizeIndex)
+                  }
                 }
               }
 
+              // Fast preliminary extension check before reading any stream bytes
+              if (!fileName.endsWith(".conf", ignoreCase = true)) {
+                throw IllegalArgumentException("Unsupported file — choose a WireGuard .conf file.")
+              }
+
+              // Fast preliminary size check from content provider if reported
+              if (reportedSize > WireGuardConfigParser.MAX_CONFIG_SIZE_BYTES) {
+                throw IllegalArgumentException("File exceeds maximum size of 64 KB — choose a valid WireGuard .conf file.")
+              }
+
+              // Bounded streaming read (strictly capped at 64 KB) to prevent OutOfMemoryError
               val content = context.contentResolver.openInputStream(uri)?.use { stream ->
-                BufferedReader(InputStreamReader(stream, StandardCharsets.UTF_8)).readText()
+                val reader = BufferedReader(InputStreamReader(stream, StandardCharsets.UTF_8))
+                val buffer = CharArray(1024)
+                val sb = StringBuilder()
+                var totalChars = 0
+                var charsRead: Int
+                while (reader.read(buffer).also { charsRead = it } != -1) {
+                  totalChars += charsRead
+                  if (totalChars > WireGuardConfigParser.MAX_CONFIG_SIZE_BYTES) {
+                    throw IllegalArgumentException("File exceeds maximum size of 64 KB — choose a valid WireGuard .conf file.")
+                  }
+                  sb.append(buffer, 0, charsRead)
+                }
+                sb.toString()
               } ?: throw IllegalArgumentException("Could not read selected document.")
 
+              // Strict parsing and validation
               val parsedConfig = WireGuardConfigParser.parse(content, fileName)
+
+              // Only persist and update state after complete validation passes (preserves previous valid profile on any error)
               WireGuardConfigStore(context).saveConfig(content, fileName)
               VpnStateHolder.updateConfig(parsedConfig)
+
               LogCatcher.getInstance(context).log(
                 LogLevel.INFO,
                 "MainActivity",
                 "Imported WireGuard configuration: ${parsedConfig.toSanitizedSummary()}"
               )
               Toast.makeText(context, "Imported $fileName successfully.", Toast.LENGTH_SHORT).show()
+            } catch (e: OutOfMemoryError) {
+              LogCatcher.getInstance(context).log(
+                LogLevel.ERROR,
+                "MainActivity",
+                "OutOfMemoryError intercepted while importing document. Previous profile preserved."
+              )
+              Toast.makeText(context, "Unsupported file — file too large to process.", Toast.LENGTH_LONG).show()
             } catch (e: Exception) {
               LogCatcher.getInstance(context).log(
                 LogLevel.ERROR,
                 "MainActivity",
                 "Failed to import WireGuard configuration: ${e.message}"
               )
-              Toast.makeText(context, "Import failed: ${e.message}", Toast.LENGTH_LONG).show()
+              Toast.makeText(context, e.message ?: "Unsupported file — choose a WireGuard .conf file.", Toast.LENGTH_LONG).show()
             }
           }
         }
@@ -212,6 +275,7 @@ class MainActivity : ComponentActivity() {
           AppDestination.HOME -> {
             VianshieldHomeScreen(
               vpnState = vpnUiState,
+              isConsentPending = isConsentPending,
               onOpenLogKeeper = { currentDestination = AppDestination.LOG_KEEPER },
               onExportRequested = {
                 exportLauncher.launch(logKeeperViewModel.getExportFileName())
@@ -220,11 +284,26 @@ class MainActivity : ComponentActivity() {
                 importConfLauncher.launch(arrayOf("*/*", "application/octet-stream", "text/plain"))
               },
               onConnectRequested = {
-                val prepareIntent = VpnService.prepare(context)
+                if (isConsentPending || vpnUiState.connectionState == VpnConnectionState.CONNECTING || vpnUiState.connectionState == VpnConnectionState.TUNNEL_ACTIVE_UNVERIFIED) {
+                  return@VianshieldHomeScreen
+                }
+                val prepareIntent = VpnService.prepare(this@MainActivity)
                 if (prepareIntent != null) {
-                  vpnConsentLauncher.launch(prepareIntent)
+                  isConsentPending = true
+                  try {
+                    vpnConsentLauncher.launch(prepareIntent)
+                  } catch (e: Exception) {
+                    isConsentPending = false
+                    LogCatcher.getInstance(context).log(
+                      LogLevel.ERROR,
+                      "MainActivity",
+                      "Failed to launch VPN consent dialog: ${e.message}"
+                    )
+                    Toast.makeText(context, "Could not open VPN permission dialog: ${e.message}", Toast.LENGTH_SHORT).show()
+                  }
                 } else {
-                  VianshieldVpnService.start(context)
+                  // Permission already granted, proceed directly
+                  VianshieldVpnService.start(this@MainActivity)
                 }
               },
               onDisconnectRequested = {
@@ -260,6 +339,7 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun VianshieldHomeScreen(
   vpnState: VpnUiState = VpnUiState(),
+  isConsentPending: Boolean = false,
   onOpenLogKeeper: () -> Unit = {},
   onExportRequested: () -> Unit = {},
   onImportConfRequested: () -> Unit = {},
@@ -377,6 +457,7 @@ fun VianshieldHomeScreen(
         // WireGuard VPN Card
         WireGuardVpnCard(
           vpnState = vpnState,
+          isConsentPending = isConsentPending,
           onImportConfRequested = onImportConfRequested,
           onConnectRequested = onConnectRequested,
           onDisconnectRequested = onDisconnectRequested
@@ -483,6 +564,7 @@ fun VianshieldHomeScreen(
 @Composable
 fun WireGuardVpnCard(
   vpnState: VpnUiState,
+  isConsentPending: Boolean = false,
   onImportConfRequested: () -> Unit,
   onConnectRequested: () -> Unit,
   onDisconnectRequested: () -> Unit,
@@ -672,11 +754,18 @@ fun WireGuardVpnCard(
           if (state == VpnConnectionState.DISCONNECTED || state == VpnConnectionState.ERROR) {
             Button(
               onClick = onConnectRequested,
+              enabled = !isConsentPending && state != VpnConnectionState.CONNECTING,
               modifier = Modifier
                 .weight(1f)
                 .testTag("btn_vpn_connect")
             ) {
-              Text(if (state == VpnConnectionState.ERROR) "Retry" else stringResource(id = R.string.action_connect))
+              Text(
+                when {
+                  isConsentPending -> stringResource(id = R.string.awaiting_vpn_permission)
+                  state == VpnConnectionState.ERROR -> "Retry"
+                  else -> stringResource(id = R.string.action_connect)
+                }
+              )
             }
             OutlinedButton(
               onClick = onImportConfRequested,
