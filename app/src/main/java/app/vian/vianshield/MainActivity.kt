@@ -15,6 +15,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.VisibleForTesting
+import java.util.concurrent.atomic.AtomicInteger
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -92,6 +94,137 @@ enum class AppDestination {
 
 class MainActivity : ComponentActivity() {
 
+  private val connectAttemptCounter = AtomicInteger(0)
+  @VisibleForTesting
+  internal var currentConsentAttempt = 0
+  @VisibleForTesting
+  internal val isConsentPendingState = mutableStateOf(false)
+
+  // Phase 5: Unconditionally registered during Activity initialization
+  private val vpnConsentLauncher = registerForActivityResult(
+    ActivityResultContracts.StartActivityForResult()
+  ) { result ->
+    handleConsentResult(result.resultCode)
+  }
+
+  @VisibleForTesting
+  internal fun handleConsentResult(resultCode: Int) {
+    val attempt = currentConsentAttempt
+    isConsentPendingState.value = false
+    LogCatcher.getInstance(this).log(
+      LogLevel.INFO,
+      TAG,
+      "VPN consent activity-result received: attempt=#$attempt, resultCode=$resultCode."
+    )
+    if (resultCode == Activity.RESULT_OK) {
+      LogCatcher.getInstance(this).log(
+        LogLevel.INFO,
+        TAG,
+        "Connect request #$attempt: VPN consent granted by user (RESULT_OK). Starting VianshieldVpnService."
+      )
+      VianshieldVpnService.start(this)
+    } else {
+      LogCatcher.getInstance(this).log(
+        LogLevel.WARN,
+        TAG,
+        "Connect request #$attempt: VPN consent not granted or dismissed (resultCode=$resultCode)."
+      )
+      Toast.makeText(
+        this,
+        getString(R.string.vpn_permission_denied),
+        Toast.LENGTH_LONG
+      ).show()
+    }
+  }
+
+  @VisibleForTesting
+  internal fun handleConnectRequested() {
+    val attempt = connectAttemptCounter.incrementAndGet()
+    LogCatcher.getInstance(this).log(
+      LogLevel.INFO,
+      TAG,
+      "Connect request #$attempt received from user."
+    )
+
+    if (isConsentPendingState.value) {
+      LogCatcher.getInstance(this).log(
+        LogLevel.WARN,
+        TAG,
+        "Connect request #$attempt rejected: already awaiting VPN consent."
+      )
+      return
+    }
+
+    val currentVpnState = VpnStateHolder.state.value.connectionState
+    if (currentVpnState == VpnConnectionState.CONNECTING || currentVpnState == VpnConnectionState.TUNNEL_ACTIVE_UNVERIFIED) {
+      LogCatcher.getInstance(this).log(
+        LogLevel.WARN,
+        TAG,
+        "Connect request #$attempt rejected: VPN tunnel is already $currentVpnState."
+      )
+      return
+    }
+
+    val prepareIntent = try {
+      VpnService.prepare(this)
+    } catch (e: Exception) {
+      LogCatcher.getInstance(this).log(
+        LogLevel.ERROR,
+        TAG,
+        "Connect request #$attempt: exception calling VpnService.prepare(): ${e.message}"
+      )
+      null
+    }
+
+    if (prepareIntent == null) {
+      LogCatcher.getInstance(this).log(
+        LogLevel.INFO,
+        TAG,
+        "Connect request #$attempt: VpnService.prepare() returned null (already prepared/granted). Starting VianshieldVpnService directly."
+      )
+      VianshieldVpnService.start(this)
+    } else {
+      val targetComponent = prepareIntent.component?.flattenToShortString() ?: "system default"
+      LogCatcher.getInstance(this).log(
+        LogLevel.INFO,
+        TAG,
+        "Connect request #$attempt: VpnService.prepare() returned Intent (target=$targetComponent)."
+      )
+      currentConsentAttempt = attempt
+      isConsentPendingState.value = true
+      try {
+        LogCatcher.getInstance(this).log(
+          LogLevel.INFO,
+          TAG,
+          "Connect request #$attempt: immediately before vpnConsentLauncher.launch()."
+        )
+        vpnConsentLauncher.launch(prepareIntent)
+      } catch (e: Exception) {
+        isConsentPendingState.value = false
+        LogCatcher.getInstance(this).log(
+          LogLevel.ERROR,
+          TAG,
+          "Connect request #$attempt: exception thrown while launching consent activity: ${e.message}"
+        )
+        Toast.makeText(this, "Could not open VPN permission dialog: ${e.message}", Toast.LENGTH_SHORT).show()
+      }
+    }
+  }
+
+  override fun onResume() {
+    super.onResume()
+    // If waiting for consent and user granted it outside or returning with grant:
+    if (isConsentPendingState.value && VpnService.prepare(this) == null) {
+      LogCatcher.getInstance(this).log(
+        LogLevel.INFO,
+        TAG,
+        "onResume: VPN permission verified as granted while awaiting consent."
+      )
+      isConsentPendingState.value = false
+      VianshieldVpnService.start(this)
+    }
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
@@ -142,33 +275,7 @@ class MainActivity : ComponentActivity() {
           }
         }
 
-        var isConsentPending by remember { mutableStateOf(false) }
-
-        // VPN consent request launcher
-        val vpnConsentLauncher = rememberLauncherForActivityResult(
-          contract = ActivityResultContracts.StartActivityForResult()
-        ) { result ->
-          isConsentPending = false
-          if (result.resultCode == Activity.RESULT_OK) {
-            LogCatcher.getInstance(context).log(
-              LogLevel.INFO,
-              "MainActivity",
-              "VPN consent granted by user. Starting VianshieldVpnService."
-            )
-            VianshieldVpnService.start(this@MainActivity)
-          } else {
-            LogCatcher.getInstance(context).log(
-              LogLevel.WARN,
-              "MainActivity",
-              "VPN consent not granted (resultCode=${result.resultCode})."
-            )
-            Toast.makeText(
-              context,
-              getString(R.string.vpn_permission_denied),
-              Toast.LENGTH_LONG
-            ).show()
-          }
-        }
+        val isConsentPending by isConsentPendingState
 
         // Document picker launcher for standard WireGuard .conf file
         val importConfLauncher = rememberLauncherForActivityResult(
@@ -284,27 +391,7 @@ class MainActivity : ComponentActivity() {
                 importConfLauncher.launch(arrayOf("*/*", "application/octet-stream", "text/plain"))
               },
               onConnectRequested = {
-                if (isConsentPending || vpnUiState.connectionState == VpnConnectionState.CONNECTING || vpnUiState.connectionState == VpnConnectionState.TUNNEL_ACTIVE_UNVERIFIED) {
-                  return@VianshieldHomeScreen
-                }
-                val prepareIntent = VpnService.prepare(this@MainActivity)
-                if (prepareIntent != null) {
-                  isConsentPending = true
-                  try {
-                    vpnConsentLauncher.launch(prepareIntent)
-                  } catch (e: Exception) {
-                    isConsentPending = false
-                    LogCatcher.getInstance(context).log(
-                      LogLevel.ERROR,
-                      "MainActivity",
-                      "Failed to launch VPN consent dialog: ${e.message}"
-                    )
-                    Toast.makeText(context, "Could not open VPN permission dialog: ${e.message}", Toast.LENGTH_SHORT).show()
-                  }
-                } else {
-                  // Permission already granted, proceed directly
-                  VianshieldVpnService.start(this@MainActivity)
-                }
+                handleConnectRequested()
               },
               onDisconnectRequested = {
                 VianshieldVpnService.stop(context)
@@ -332,6 +419,10 @@ class MainActivity : ComponentActivity() {
   override fun onDestroy() {
     super.onDestroy()
     LogCatcher.getInstance(this).markCleanShutdown()
+  }
+
+  companion object {
+    private const val TAG = "MainActivity"
   }
 }
 

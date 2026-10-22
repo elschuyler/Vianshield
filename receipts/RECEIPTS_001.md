@@ -306,3 +306,22 @@
 - **How It Was Verified**: Local build only. Verified via `compile_applet` (succeeded) and `gradle :app:testDebugUnitTest --rerun-tasks` (30 actionable tasks executed, 0 errors, `BUILD SUCCESSFUL in 59s`). All 34 unit and Robolectric tests in `WireGuardConfigTest` (17 tests), `LogCatcherTest` (15 tests), `ExampleRobolectricTest` (1 test), and `ExampleUnitTest` (1 test) passed with 100% success rate.
 - **Deviations**: None. No new unrequested features or refactoring added.
 - **Known Issues / Follow-up**: Ready for on-device testing of configuration import and VPN consent granting with the updated APK.
+## Entry 014
+- **Timestamp**: 2026-10-21T12:55:00-07:00
+- **Summary**: Remediated missing Android VPN consent dialog (unconditional Activity Result launcher registration during Activity initialization, structured diagnostic logging, and robust consent state machine).
+- **Exact Files Touched**:
+  - `app/src/main/java/app/vian/vianshield/MainActivity.kt`
+  - `app/src/test/java/app/vian/vianshield/WireGuardConfigTest.kt`
+  - `BLUEPRINT.md`
+  - `receipts/RECEIPTS_001.md`
+- **What Was Done**:
+  - Traced missing VPN consent dialog root cause: `vpnConsentLauncher` was previously registered dynamically and conditionally inside the Compose `setContent` hierarchy using `rememberLauncherForActivityResult`. State changes (`isConsentPending`) triggered recompositions and `DisposableEffect` re-evaluations, detaching the launcher from the system Activity Result registry and causing Android to immediately return `resultCode=0` (`RESULT_CANCELED`) without visibly presenting `ConfirmDialog`.
+  - Moved `vpnConsentLauncher` to an unconditional member property of `MainActivity` registered at class instantiation via `registerForActivityResult(ActivityResultContracts.StartActivityForResult())`, satisfying the Android Activity Result API lifecycle requirement.
+  - Added structured diagnostic logging to `LogCatcher` (zero secrets): attempt counter for each Connect request, exact return type and target component of `VpnService.prepare()`, log immediately before launcher invocation, activity result callback with attempt number and result code, and rejection logs for duplicate requests.
+  - Implemented `handleConnectRequested()`, `handleConsentResult()`, and `onResume()` validation checking if VPN permission was granted while awaiting consent.
+  - Formatted cancellation/dismissal feedback neutrally ("VPN permission was not granted or dismissed"), avoiding false claims of deliberate user denial.
+  - Verified `AndroidManifest.xml` VPN service integration (`BIND_VPN_SERVICE`, `exported="false"`, `<action android:name="android.net.VpnService" />`).
+  - Added unit test `consent state transitions and duplicate request rejection` in `WireGuardConfigTest` verifying initial state, in-flight debounce, duplicate connect rejection, and clean reset on CANCELED and OK. Total tests increased to 35.
+- **How It Was Verified**: Local build only. Verified via `compile_applet` (succeeded) and `gradle :app:testDebugUnitTest` (30 actionable tasks, 0 errors, `BUILD SUCCESSFUL in 50s`). All 35 tests across `WireGuardConfigTest` (18), `LogCatcherTest` (15), `ExampleRobolectricTest` (1), and `ExampleUnitTest` (1) passed with 100% success rate.
+- **Deviations**: None. Preserved Compose UI, configuration import, Log Keeper, Firestack runtime, and tunnel lifecycle.
+- **Known Issues / Follow-up**: Ready for on-device testing of the VPN confirmation dialog on the updated debug APK.

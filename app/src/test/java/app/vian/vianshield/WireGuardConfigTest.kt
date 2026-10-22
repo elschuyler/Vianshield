@@ -398,4 +398,34 @@ class WireGuardConfigTest {
     assertEquals("primary.conf", currentStoredConfig?.originalFileName)
     assertEquals("198.51.100.1:51820", currentStoredConfig?.peerEndpoint)
   }
+
+  @Test
+  fun `consent state transitions and duplicate request rejection`() {
+    val activityController = org.robolectric.Robolectric.buildActivity(MainActivity::class.java).setup()
+    val activity = activityController.get()
+
+    // 1. Initial state: not pending
+    assertFalse("Consent pending must be false initially", activity.isConsentPendingState.value)
+    assertEquals(0, activity.currentConsentAttempt)
+
+    // 2. Simulate pending consent
+    activity.isConsentPendingState.value = true
+    activity.currentConsentAttempt = 1
+
+    // 3. Duplicate connect attempt while consent is pending must be rejected
+    val previousAttempt = activity.currentConsentAttempt
+    activity.handleConnectRequested()
+    assertEquals("Duplicate connect request must not advance consent attempt", previousAttempt, activity.currentConsentAttempt)
+    assertTrue("Consent pending must remain true during pending request", activity.isConsentPendingState.value)
+
+    // 4. Simulated consent result CANCELED
+    activity.handleConsentResult(android.app.Activity.RESULT_CANCELED)
+    assertFalse("Consent pending must be reset to false after cancellation", activity.isConsentPendingState.value)
+
+    // 5. Simulated consent result OK
+    activity.isConsentPendingState.value = true
+    activity.currentConsentAttempt = 2
+    activity.handleConsentResult(android.app.Activity.RESULT_OK)
+    assertFalse("Consent pending must be reset to false after OK", activity.isConsentPendingState.value)
+  }
 }
