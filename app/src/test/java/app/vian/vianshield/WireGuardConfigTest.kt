@@ -427,5 +427,17 @@ class WireGuardConfigTest {
     activity.currentConsentAttempt = 2
     activity.handleConsentResult(android.app.Activity.RESULT_OK)
     assertFalse("Consent pending must be reset to false after OK", activity.isConsentPendingState.value)
+
+    // 6. Test onActivityResult routing
+    activity.isConsentPendingState.value = true
+    activity.currentConsentAttempt = 3
+
+    // Mismatched request code must be ignored
+    activity.onActivityResult(999, android.app.Activity.RESULT_OK, null)
+    assertTrue("Mismatched requestCode must leave consent pending state unchanged", activity.isConsentPendingState.value)
+
+    // Matching request code REQUEST_CODE_VPN_CONSENT must dispatch to handleConsentResult
+    activity.onActivityResult(MainActivity.REQUEST_CODE_VPN_CONSENT, android.app.Activity.RESULT_CANCELED, null)
+    assertFalse("Matching REQUEST_CODE_VPN_CONSENT must reset pending state", activity.isConsentPendingState.value)
   }
 }

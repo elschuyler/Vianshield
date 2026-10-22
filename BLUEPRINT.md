@@ -101,14 +101,13 @@ Vianshield is a lean, native Android security utility designed to run efficientl
     - Disabled Connect button with "Awaiting Permission…" status text while the system consent dialog is pending.
     - Handled `Activity.RESULT_OK` (starts VPN) and `Activity.RESULT_CANCELED` (accurate non-granted warning toast) cleanly without false "denied" reports or repeated launcher calls.
   - Added 6 new regression unit tests in `WireGuardConfigTest` (invalid extensions, empty text, >64 KB oversized configs, arbitrary documents, binary NUL bytes, and profile preservation). Total 34 tests passing (100%).
-- **2026-10-21 (Phase 5: Android VPN Consent Screen Diagnostic & Architecture Fix)**:
-  - *Root Cause Analysis*: In the previous implementation, `vpnConsentLauncher` was registered dynamically and conditionally inside the Compose `setContent { ... }` block using `rememberLauncherForActivityResult`. When `isConsentPending` state changed, Compose recomposed `VianshieldHomeScreen` and re-evaluated the launcher within `DisposableEffect`, causing in-flight Activity Result registration to detach or cancel before the Android system dialog could be presented, triggering immediate `resultCode=0`.
+- **2026-10-22 (Phase 5: Activity-based VPN Consent Migration & System Diagnostics)**:
+  - *Root Cause Analysis*: In AOSP (`ConfirmDialog.java`), `getCallingPackage()` is inspected on dialog creation to attribute the caller. When using AndroidX's `ActivityResultRegistry`, caller resolution can be obscured or detached depending on OEM framework dispatch. Furthermore, `ConfirmDialog` automatically and silently invokes `finish()` (returning `RESULT_CANCELED`, code 0, in the exact same second) under two critical system conditions: (1) `UserManager.hasUserRestriction(DISALLOW_CONFIG_VPN)` is true, or (2) another app has "Always-On VPN" configured in Android Settings (`mVm.getAlwaysOnVpnPackageForUser() != null`).
   - *Remediation*:
-    - Registered `vpnConsentLauncher` unconditionally during `MainActivity` class initialization using `registerForActivityResult(ActivityResultContracts.StartActivityForResult())`, satisfying Android's Activity Result API lifecycle requirement.
-    - Implemented `handleConnectRequested()` and `handleConsentResult()` as dedicated, testable methods on `MainActivity`.
-    - Added comprehensive non-sensitive diagnostic logging: logged each connect request with an incrementing attempt counter, logged whether `VpnService.prepare()` returned null or an Intent with component name, logged immediately before `launcher.launch()`, logged result callbacks with result code and attempt number, and logged rejection of duplicate requests while consent is in-flight.
-    - Ensured `onResume()` checks if consent was granted outside the immediate callback.
-    - Maintained exact distinction: cancelled/dismissed results (`resultCode != RESULT_OK`) are factually reported as "not granted or dismissed", never assumed as deliberate user denial.
-    - Verified `VianshieldVpnService` manifest declaration (`android.permission.BIND_VPN_SERVICE`, `android:exported="false"`, `<action android:name="android.net.VpnService" />`).
-  - Added unit test in `WireGuardConfigTest` (`consent state transitions and duplicate request rejection`) verifying initial state, in-flight debounce, duplicate connect rejection, and clean reset on CANCELED and OK. Total 35 tests passing (100%).
+    - Replaced AndroidX `vpnConsentLauncher` with Intra and NetGuard's proven direct Activity pattern: `startActivityForResult(prepareIntent, REQUEST_CODE_VPN_CONSENT)` with `REQUEST_CODE_VPN_CONSENT = 100` and `onActivityResult()`.
+    - Added comprehensive on-device diagnostic probes before launching: checks if `UserManager.DISALLOW_CONFIG_VPN` is set, verifies `packageManager.resolveActivity()` returns an exported system activity, checks `com.android.vpndialogs` enabled state, and logs the outcome to Log Keeper without recording private keys or secrets.
+    - Added explicit `ActivityNotFoundException` and generic `Exception` catch handlers with user-facing toasts and Log Keeper error entries.
+    - Updated `handleConsentResult()` and cancellation toasts to instruct the user if `DISALLOW_CONFIG_VPN` is active or if another VPN has "Always-On VPN" locked in Android Settings.
+    - Added test coverage in `WireGuardConfigTest` verifying `onActivityResult` request code filtering and state transitions. Total 35 tests passing (100%).
+
 

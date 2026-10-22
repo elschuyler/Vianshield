@@ -1,12 +1,15 @@
 package app.vian.vianshield
 
 import android.app.Activity
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.net.VpnService
 import android.os.Build
 import android.os.Bundle
+import android.os.UserManager
 import android.provider.OpenableColumns
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -100,11 +103,13 @@ class MainActivity : ComponentActivity() {
   @VisibleForTesting
   internal val isConsentPendingState = mutableStateOf(false)
 
-  // Phase 5: Unconditionally registered during Activity initialization
-  private val vpnConsentLauncher = registerForActivityResult(
-    ActivityResultContracts.StartActivityForResult()
-  ) { result ->
-    handleConsentResult(result.resultCode)
+  @Suppress("DEPRECATION")
+  @VisibleForTesting
+  public override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+    super.onActivityResult(requestCode, resultCode, data)
+    if (requestCode == REQUEST_CODE_VPN_CONSENT) {
+      handleConsentResult(resultCode)
+    }
   }
 
   @VisibleForTesting
@@ -124,16 +129,20 @@ class MainActivity : ComponentActivity() {
       )
       VianshieldVpnService.start(this)
     } else {
+      val userManager = getSystemService(Context.USER_SERVICE) as? UserManager
+      val isVpnDisallowed = userManager?.hasUserRestriction(UserManager.DISALLOW_CONFIG_VPN) ?: false
       LogCatcher.getInstance(this).log(
         LogLevel.WARN,
         TAG,
-        "Connect request #$attempt: VPN consent not granted or dismissed (resultCode=$resultCode)."
+        "Connect request #$attempt: VPN consent not granted or dismissed (resultCode=$resultCode, disallowConfigVpn=$isVpnDisallowed). " +
+          "Note: If another VPN has Always-on VPN enabled in Android Settings, the system dialog dismisses automatically."
       )
-      Toast.makeText(
-        this,
-        getString(R.string.vpn_permission_denied),
-        Toast.LENGTH_LONG
-      ).show()
+      val message = if (isVpnDisallowed) {
+        "VPN configuration is disallowed on this device."
+      } else {
+        getString(R.string.vpn_permission_denied)
+      }
+      Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
   }
 
@@ -190,15 +199,64 @@ class MainActivity : ComponentActivity() {
         TAG,
         "Connect request #$attempt: VpnService.prepare() returned Intent (target=$targetComponent)."
       )
+
+      // Diagnostic checks: system restrictions and dialog component resolvability
+      val userManager = getSystemService(Context.USER_SERVICE) as? UserManager
+      val isVpnDisallowed = userManager?.hasUserRestriction(UserManager.DISALLOW_CONFIG_VPN) ?: false
+      if (isVpnDisallowed) {
+        LogCatcher.getInstance(this).log(
+          LogLevel.WARN,
+          TAG,
+          "Connect request #$attempt: UserManager.DISALLOW_CONFIG_VPN is TRUE on this device. System dialog will be blocked."
+        )
+      }
+
+      val resolveInfo = packageManager.resolveActivity(prepareIntent, 0)
+      val resolvedComponent = resolveInfo?.activityInfo?.let { "${it.packageName}/${it.name}" } ?: "NONE"
+      LogCatcher.getInstance(this).log(
+        LogLevel.INFO,
+        TAG,
+        "Connect request #$attempt: resolveActivity=$resolvedComponent (exported=${resolveInfo?.activityInfo?.exported})"
+      )
+
+      try {
+        val appInfo = packageManager.getApplicationInfo("com.android.vpndialogs", 0)
+        LogCatcher.getInstance(this).log(
+          LogLevel.INFO,
+          TAG,
+          "Connect request #$attempt: com.android.vpndialogs enabled=${appInfo.enabled}"
+        )
+      } catch (e: Exception) {
+        LogCatcher.getInstance(this).log(
+          LogLevel.WARN,
+          TAG,
+          "Connect request #$attempt: package com.android.vpndialogs status: ${e.message}"
+        )
+      }
+
       currentConsentAttempt = attempt
       isConsentPendingState.value = true
       try {
         LogCatcher.getInstance(this).log(
           LogLevel.INFO,
           TAG,
-          "Connect request #$attempt: immediately before vpnConsentLauncher.launch()."
+          "Connect request #$attempt: immediately before startActivityForResult(requestCode=$REQUEST_CODE_VPN_CONSENT)."
         )
-        vpnConsentLauncher.launch(prepareIntent)
+        @Suppress("DEPRECATION")
+        startActivityForResult(prepareIntent, REQUEST_CODE_VPN_CONSENT)
+        LogCatcher.getInstance(this).log(
+          LogLevel.INFO,
+          TAG,
+          "Connect request #$attempt: startActivityForResult launched successfully."
+        )
+      } catch (e: ActivityNotFoundException) {
+        isConsentPendingState.value = false
+        LogCatcher.getInstance(this).log(
+          LogLevel.ERROR,
+          TAG,
+          "Connect request #$attempt: ActivityNotFoundException launching VPN consent: ${e.message}"
+        )
+        Toast.makeText(this, "VPN dialog activity not found on device.", Toast.LENGTH_LONG).show()
       } catch (e: Exception) {
         isConsentPendingState.value = false
         LogCatcher.getInstance(this).log(
@@ -423,6 +481,7 @@ class MainActivity : ComponentActivity() {
 
   companion object {
     private const val TAG = "MainActivity"
+    const val REQUEST_CODE_VPN_CONSENT = 100
   }
 }
 

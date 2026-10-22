@@ -325,3 +325,23 @@
 - **How It Was Verified**: Local build only. Verified via `compile_applet` (succeeded) and `gradle :app:testDebugUnitTest` (30 actionable tasks, 0 errors, `BUILD SUCCESSFUL in 50s`). All 35 tests across `WireGuardConfigTest` (18), `LogCatcherTest` (15), `ExampleRobolectricTest` (1), and `ExampleUnitTest` (1) passed with 100% success rate.
 - **Deviations**: None. Preserved Compose UI, configuration import, Log Keeper, Firestack runtime, and tunnel lifecycle.
 - **Known Issues / Follow-up**: Ready for on-device testing of the VPN confirmation dialog on the updated debug APK.
+
+## Entry 015
+- **Timestamp**: 2026-10-22T14:18:00-07:00
+- **Summary**: Implemented Phase 5 Activity-based VPN consent flow migration (`startActivityForResult`/`onActivityResult`), diagnostic checks (`UserManager.DISALLOW_CONFIG_VPN` and `packageManager.resolveActivity`), and comprehensive error handling.
+- **Exact Files Touched**:
+  - `app/src/main/java/app/vian/vianshield/MainActivity.kt`
+  - `app/src/test/java/app/vian/vianshield/WireGuardConfigTest.kt`
+  - `BLUEPRINT.md`
+  - `receipts/RECEIPTS_001.md`
+- **What Was Done**:
+  - Investigated AOSP `ConfirmDialog.java` (`packages/VpnDialogs/src/com/android/vpndialogs/ConfirmDialog.java`): identified that `ConfirmDialog` immediately calls `finish()` (returning `RESULT_CANCELED` 0 in the same second without showing dialog UI) if `getCallingPackage()` cannot be attributed, if `UserManager.hasUserRestriction(DISALLOW_CONFIG_VPN)` is true, or if another VPN app is configured as "Always-On VPN" on the device (`alwaysOnVpnPackage != null`).
+  - Replaced AndroidX `vpnConsentLauncher` with Intra and NetGuard's direct Activity-based pattern: `startActivityForResult(prepareIntent, REQUEST_CODE_VPN_CONSENT)` with `REQUEST_CODE_VPN_CONSENT = 100` and `onActivityResult()`.
+  - Added on-device diagnostic probes before launch: checks `UserManager.DISALLOW_CONFIG_VPN`, inspects `packageManager.resolveActivity(prepareIntent, 0)` for component and exported status, and queries `com.android.vpndialogs` enabled state.
+  - Wrapped `startActivityForResult` in explicit `ActivityNotFoundException` and generic `Exception` catch handlers with user toasts and Log Keeper entries.
+  - Formatted non-granted/dismissal feedback to guide the user on checking if another VPN has "Always-On VPN" enabled in Android Settings or if device policy restricts VPNs.
+  - Added unit and Robolectric tests in `WireGuardConfigTest` verifying `onActivityResult` request code filtering and state transitions. Total 35 tests passing (100%).
+- **How It Was Verified**: Local build only. Verified via `compile_applet` (succeeded) and `gradle :app:testDebugUnitTest` (30 actionable tasks, 0 errors, `BUILD SUCCESSFUL in 49s`). All 35 tests across `WireGuardConfigTest` (18), `LogCatcherTest` (15), `ExampleRobolectricTest` (1), and `ExampleUnitTest` (1) passed with 100% success rate.
+- **Deviations**: None. Preserved Compose UI, configuration import, memory bounds, Log Keeper, Firestack runtime, and tunnel lifecycle.
+- **Known Issues / Follow-up**: Ready for on-device testing of the VPN confirmation dialog on the updated debug APK.
+
